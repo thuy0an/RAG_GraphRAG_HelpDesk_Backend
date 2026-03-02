@@ -1,0 +1,15 @@
+.idea
+.data
+.env
+
+venv
+static/
+.windsurf/
+
+packages.sh
+config.yaml
+script.sh
+
+**/__pycache__/
+*.py[cod]
+*$py.class
