@@ -1,22 +1,27 @@
 from collections import defaultdict
 import json
+import logging
 import os
 import shutil
 import tempfile
 import time
-from typing import Any, Dict, List, Optional
-from Features.LangChainAPI.RedisVectorRepo import RedisVectorRepo
-from Features.LangChainAPI.LangChainDTO import Callback, ChunkResponse, SplitRequest
+from typing import Any, List
+import uuid
+from langchain_classic.retrievers import ParentDocumentRetriever
+from Features.LangChainAPI.LangChainDTO import Callback, ChunkResponse, RagRequest, RagType, SplitRequest
+from Features.LangChainAPI.repo.RedisVS import RedisVS
 from SharedKernel.ai.AIConfig import AIConfigFactory
 from SharedKernel.persistence.Decorators import Service
 from SharedKernel.utils.yamlenv import load_env_yaml
-from langchain_community.document_loaders import PlaywrightURLLoader, UnstructuredPDFLoader
+from langchain_community.document_loaders import PlaywrightURLLoader
+from langchain_unstructured import UnstructuredLoader
 from fastapi import UploadFile
 from langchain_core.documents import Document
 from langchain_core.language_models import BaseChatModel
-from langchain_core.retrievers import BaseRetriever
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger(__name__)
 config = load_env_yaml()
 
 # @Service
@@ -27,36 +32,69 @@ class Synthesis:
         self.ai_factory = ai_factory
         self.loader = Loader(self.provider, self.callbacks)
         self.process = Process(self.provider, self.callbacks)
-        self.vs_repo = RedisVectorRepo(self.ai_factory)
+        self.vs_repo = RedisVS(self.ai_factory)
     ...
 
-    async def call_rag(self, query: str):
-        result = await self.syn.vs_repo.manual_rag(
-            query=query, 
-            provider=self.provider
-        )
-        return result
+    async def call_rag(self, req: RagRequest):
+        # child_splitter = RecursiveCharacterTextSplitter(chunk_size=500)
+        # parent_splitter = RecursiveCharacterTextSplitter(chunk_size=2000)
+        
+        # retriever = ParentDocumentRetriever(
+        #     vectorstore=self.vs_repo.vectorstore,
+        #     docstore=self.vs_repo.docstore_redis,
+        #     child_splitter=child_splitter,
+        #     parent_splitter=parent_splitter,
+        # )
+        
+        # relevant_docs = retriever.invoke(req.query)
+        # print(relevant_docs)
+
+        # await self.vs_repo.abstract_rag(
+        #     query=req.query,
+        #     k=5
+        # )
+        # return result
+        ...
 
     #
     # INGEST
     #
     async def ingest_pdf(self, file: UploadFile):
-        await self.vs_repo.delete_documents_by_metadata(
-            {
-                "source": file.filename
-            }
-        )
-
         docs = self.loader.load_pdf(file)
-        if not docs:
+        if not docs["documents"]:
             print("No documents loaded")
             return
-        print(f"Loaded {len(docs)} elements")
         all_chunks = self.process.split_by_page(docs)
-        # await self.batch_ingest_with_metadata(file, all_chunks)
+        await self.batch_ingest_with_metadata(all_chunks)
     ...
 
-    async def batch_ingest_with_metadata(self, file: UploadFile, chunks: List[Any]):
+    """
+
+    """
+    async def ingest_pdf_Pc(self, file: UploadFile):
+        docs = self.loader.load_pdf_Pc(file)
+        log.info(docs)
+        # if not docs:
+        #     print("No documents loaded")
+        #     return
+        # chunks = self.process.split_by_page_PaC(docs)
+        # print(chunks)
+        # parent_ids = []
+        # for parent in chunks["parent"]:
+        #     key = f"parent:{docs.get('filename', 'unknown')}:page_{parent.metadata.get('page_number', 0)}:{parent.metadata.get('parent_index', 0)}"
+        #     self.vs_repo.docstore_redis.mset([(key, parent.page_content)])
+        #     parent_ids.append(key)
+        #     print(f"Saved parent: {key}")
+    ...
+
+    """
+    TODO: chua implement, xoa doc hien co de cap nhat docs moi
+    """
+    async def update_docs(self):
+        ...
+
+
+    async def batch_ingest_with_metadata(self, chunks: List[Any]):
         documents = []
         current_time = int(time.time())
 
@@ -64,12 +102,10 @@ class Synthesis:
             metadata = chunk.metadata if chunk.metadata else {}
 
             metadata.update({
-                "source": file.filename,
                 "chunk_index": i,
                 "total_chunks": len(chunks),
                 "timestamp": current_time,
-                "content_length": len(chunk.content),
-                "type": file.content_type
+                "content_length": len(chunk.content)
             })
         
             documents.append(Document(
@@ -82,7 +118,7 @@ class Synthesis:
         if documents:
             print(f"Sample metadata: {documents[0].metadata}")
         
-        await self.abatch_add_documents(documents)
+        await self.vs_repo.abatch_add_documents(documents)
     ...
 
 ###
@@ -107,7 +143,8 @@ class Loader:
         return documents[0].page_content
     ...
 
-    def load_pdf(self, file: UploadFile):
+
+    def load_pdf_Pc(self, file: UploadFile):
         if file.filename and not file.filename.lower().endswith('.pdf'):
             raise ValueError(f"File {file.filename} is not a PDF file")
 
@@ -115,20 +152,45 @@ class Loader:
             shutil.copyfileobj(file.file, temp_file)
             temp_path = temp_file.name
 
-        loader = UnstructuredPDFLoader(
-            temp_path, 
-            mode="elements"
+        loader = UnstructuredLoader(
+            file_path="data.pdf",
+            mode="paged"
         )
         documents = loader.load()
         
+        formatted_docs = []
+        for doc in documents:
+            metadata = {
+                "page_number": doc.metadata.get("page_number", 1),
+                "source": file.filename,
+                "language": doc.metadata.get("languages", ["unknown"])[0],
+                "content_type": file.content_type
+            }
+            
+            formatted_doc = Document(
+                page_content=doc.page_content,
+                metadata=metadata
+            )
+            formatted_docs.append(formatted_doc)
+        
         os.unlink(temp_path)
+        return formatted_docs
+        ...
 
-        return documents
-    ...
-...
 
 ###
+law_separators=[
+    r'(?=\n\nĐiều\s+\d+)', 
+    r'(?=\nĐiều\s+\d+)',
+
+    r'(?=\n\d+\.\s)', 
+    
+    "\n\n",
+    "\n",
+    " ",
+]
 class Process:
+
     def __init__(self,         
         provider: BaseChatModel, 
         callbacks: Callback
@@ -137,16 +199,16 @@ class Process:
         self.callbacks = callbacks or {}
     ...
 
-    def _split_docs(self, split_req: SplitRequest):
+    def _split_docs(self, text: str):
         text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=split_req.chunk_size,
-            chunk_overlap=split_req.chunk_overlap,
-            separators=split_req.separators,
-            length_function=len,
-            is_separator_regex=False
+            chunk_size=config.splitter.chunk_size,
+            chunk_overlap=config.splitter.chunk_overlap,
+            separators=law_separators,
+            is_separator_regex=True,
+            strip_whitespace=True  
         )
 
-        docs = text_splitter.create_documents([split_req.text])
+        docs = text_splitter.create_documents([text])
 
         chunks = [
             ChunkResponse(
@@ -160,44 +222,115 @@ class Process:
         return chunks
         ...
 
-    def split_by_page(self, docs: List[Any]):
-        page_groups = {}
+    def split_by_page(self, docs: List[Document]):
+
         for doc in docs:
-            page_num = doc.metadata.get('page_number', 0)
-            page_groups.setdefault(page_num, []).append(doc)
-        
-        print(f"Grouped into {len(page_groups)} pages")
-
-        all_chunks = []
-        for page_num, page_docs in sorted(page_groups.items()):
-            print(f"Processing page {page_num} with {len(page_docs)} elements")
-            
-            page_text = "\n\n".join(doc.page_content for doc in page_docs)
-            
-            req_split = SplitRequest()
-            req_split.text = page_text
-            req_split.chunk_size = config.splitter.chunk_size
-            req_split.chunk_overlap = config.splitter.chunk_overlap
-            req_split.separators = config.splitter.separators
-            
-            page_chunks = self._split_docs(req_split)
-            
+            page_chunks = self._split_docs(doc.page_content)
             print(f" -> Created {len(page_chunks)} chunks")
-            
+
             for chunk in page_chunks:
-                if not chunk.metadata:
-                    chunk.metadata = {}
+                ...
+        # page_groups = {}
+        # for doc in docs["documents"]:
+        #     page_number = doc.metadata.get('page_number', 0)
+        #     page_groups.setdefault(page_number, []).append(doc)
+        
+        # print(f"Grouped into {len(page_groups)} pages]\n\n")
 
-                chunk.metadata.update({
-                    'page_number': page_num,
-                    'total_elements': len(page_docs)
-                })
+        # all_chunks = []
+        # for page_number, page_docs in sorted(page_groups.items()):
+        #     print(f"Processing page {page_number} with {len(page_docs)} elements")
+            
+        #     page_text = "\n\n".join(doc.page_content for doc in page_docs)
+        #     print(page_text)
+            
+        #     page_chunks = self._split_docs(page_text)
+            
+        #     print(f" -> Created {len(page_chunks)} chunks")
+            
+        #     for chunk in page_chunks:
+        #         if not chunk.metadata:
+        #             chunk.metadata = {}
 
-                print(f"  Chunk {chunk.index}: {len(chunk.content)} chars")
-                print(f"   Page: {chunk.metadata['page_number']}")
-            all_chunks.extend(page_chunks)
-        print(f"Total chunks created: {len(all_chunks)}")
+        #         chunk.metadata.update({
+        #             "source": docs.get("filename", ""),
+        #             "language": docs.get("language", ""),
+        #             "content_type": docs.get("content_type", ""),
+        #             'page_number': page_number,
+        #             'total_elements': len(page_docs),
+        #         })
 
-        return all_chunks
+        #         print(f"  Chunk {chunk.index}: {len(chunk.content)} chars")
+        #         print(f"   Page: {chunk.metadata['page_number']}")
+        #     all_chunks.extend(page_chunks)
+
+        # print(f"Total chunks created: {len(all_chunks)}")
+
+        # return all_chunks
         ...
+
+    def _split_docs_PaC(self, text: str):
+        parent_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=2000,
+            chunk_overlap=200,
+            separators=law_separators,
+            is_separator_regex=True,
+            strip_whitespace=True
+        )
+        child_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=500,
+            chunk_overlap=50,
+            separators=law_separators,
+            is_separator_regex=True,
+            strip_whitespace=True
+        )
+        
+        parent_chunks = parent_splitter.create_documents([text])
+        
+        child_chunks = []
+        for i, parent in enumerate(parent_chunks):
+            children = child_splitter.create_documents([parent.page_content])
+            for child in children:
+                child.metadata = child.metadata or {}
+                child.metadata.update({
+                    "parent_id": str(i)
+                })
+            child_chunks.extend(children)
+        
+        return {
+            "parent"   : parent_chunks,
+            "children" : child_chunks
+        }
+
+    def split_PaC(self, docs: List[Document]):
+        parent_chunks = []
+        child_chunks = []
+
+        for doc in docs:
+            page_chunks = self._split_docs_PaC(doc.page_content)
+            print(f" -> Parent {len(page_chunks['parent'])} chunks")
+            print(f" -> Children {len(page_chunks['children'])} chunks")
+
+            for idx, parent in enumerate(page_chunks["parent"]):
+                parent.metadata = parent.metadata or {}
+                parent.metadata.update({
+                    "source": doc.metadata.get("source", ""),
+                    "language": doc.metadata.get("language", ""),
+                    "content_type": doc.metadata.get("content_type", ""),
+                    "page_number": doc.metadata.get("page_number", 0),
+                    "parent_index": idx,
+                })
+                parent_chunks.append(parent)
+            
+            for idx, child in enumerate(page_chunks["children"]):
+                child.metadata = child.metadata or {}
+                child.metadata.update({
+                    "source": doc.metadata.get("source", ""),
+                    "language": doc.metadata.get("language", ""),
+                    "content_type": doc.metadata.get("content_type", ""),
+                    "page_number": doc.metadata.get("page_number", 0),
+                })
+                child_chunks.append(child)
+
+        print(parent_chunks, "\n\n\n", child_chunks)
 ###  

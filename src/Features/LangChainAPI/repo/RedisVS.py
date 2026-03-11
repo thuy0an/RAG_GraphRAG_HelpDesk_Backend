@@ -1,27 +1,33 @@
+import asyncio
+import json
 import logging
 from re import search
 import time
 from typing import Any, Dict, List, Optional
-from SharedKernel.ai.AIConfig import AIConfig, AIConfigFactory
+from langchain_community.storage.redis import RedisStore
+from redis import Redis
+from SharedKernel.ai.AIConfig import AIConfigFactory
 from SharedKernel.ai.vector_store.VectorStoreConfig import VectoreStoreConfigFactory
 from SharedKernel.persistence.Decorators import Repository
 from SharedKernel.utils.yamlenv import load_env_yaml
-from fastapi import UploadFile
 from langchain_core.documents import Document
-from langchain_core.vectorstores import VectorStore
-from langchain_core.retrievers import BaseRetriever
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_community.retrievers import BM25Retriever
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
 config = load_env_yaml()
 
-class RedisVectorRepo:
+class RedisVS:
     def __init__(self, ai_factory: AIConfigFactory):
         self.ai_config = ai_factory.create(config.ai.llm_provider)
         self.embeddings = self.ai_config.create_embedding()
-        self.vector_store_config = VectoreStoreConfigFactory.create(config.vector_store.provider)
-        self.vs_repo = self.vector_store_config.get_vecstore(self.embeddings)
+        self.vs_config = VectoreStoreConfigFactory.create(config.vector_store.provider)
+        self.vs_repo = self.vs_config.get_vecstore(self.embeddings)
+
+        self.redis_url = self.vs_config.get_url()
+        print(f"Redis URL: {self.redis_url}")
+        self.docstore_redis = RedisStore(redis_url=self.redis_url)
         ...
     # 
     # DOCUMENT 
@@ -45,6 +51,7 @@ class RedisVectorRepo:
         print(f"Added {len(documents)} documents with metadata")
         return all_ids
         ...
+
 
     async def add_documents_with_metadata(self, documents: List[Document]):      
         if documents:
@@ -216,6 +223,69 @@ class RedisVectorRepo:
         }
         ...
 
+    def get_all_docs(self):        
+        from redis.client import Redis as RedisClient
+        cursor = 0
+        docs = []
+        
+        r = RedisClient.from_url(self.redis_url)
+
+        while True:
+            cursor, keys = r.scan(cursor, match=f"{self.vs_config.index_name}:*", count=100)
+            
+            for k in keys:
+                doc_data = r.hgetall(k)
+                if doc_data:
+                    content = doc_data.get(b'text', b'').decode('utf-8')
+                    
+                    metadata = {}
+                    for key, value in doc_data.items():
+                        if key == b'text':
+                            continue
+                        try:
+                            key_str = key.decode('utf-8')
+                            value_str = value.decode('utf-8')
+                            metadata[key_str] = value_str
+                        except UnicodeDecodeError:
+                            continue
+
+                    if '_metadata_json' in metadata:
+                        try:
+                            json_meta = json.loads(metadata['_metadata_json'])
+                            metadata.update(json_meta)
+                            del metadata['_metadata_json']
+                        except json.JSONDecodeError:
+                            pass
+                    
+                    metadata['id'] = k.decode('utf-8')
+                    
+                    docs.append(Document(page_content=content, metadata=metadata))
+            if cursor == 0:
+                break
+        
+        r.close()
+        return docs
+        ...
+
+    async def abstract_rag(self, query: str, k: int = 1):
+        from langchain_classic.retrievers import EnsembleRetriever
+        all_docs = self.get_all_docs()
+        print(f"{all_docs}\n\n\n")
+        vector_retriever = self.vs_repo.as_retriever(search_kwargs={"k": k})
+        result = await vector_retriever.ainvoke(query)
+        print(result)
+
+        bm25_retriever = BM25Retriever.from_documents(all_docs)
+        bm25_retriever.k = k
+
+        vector_retriever = self.vs_repo.as_retriever(search_kwargs={"k": k})
+
+        hybrid_retriever = HybridRetriever(bm25_retriever, vector_retriever)
+
+        result = await hybrid_retriever.asearch(query)
+        print(result)
+    ...
+
     def _format_context(
         self,
         search_results: List[Dict[str, Any]],
@@ -264,3 +334,54 @@ class RedisVectorRepo:
         
         return formatted_context
     ...
+    
+class HybridRetriever:
+    def __init__(self, 
+        bm25_retriever: BM25Retriever, 
+        vector_retriever: Any,
+        k: int = 5,
+        rrf_k: float = 60.0
+    ):
+        self.bm25 = bm25_retriever
+        self.vector = vector_retriever
+        self.k = k
+        self.rrf_k = rrf_k 
+
+    async def asearch(self, query):
+
+        bm25_task = asyncio.create_task(self.bm25.ainvoke(query))
+        vector_task = asyncio.create_task(self.vector.ainvoke(query))
+
+        bm25_docs, vector_docs = await asyncio.gather(bm25_task, vector_task)
+        
+        # print(bm25_docs,"\n\n\n")
+        # print(vector_docs,"\n\n\n")
+
+        result = self.reciprocal_rank_fusion([bm25_docs, vector_docs])
+
+        return result
+
+    def reciprocal_rank_fusion(self, results_list):
+        """
+        Reciprocal Rank Fusion1
+        """
+        print("RRF...")
+
+        score_map = {}
+        for results in results_list:
+            for rank, doc in enumerate(results):
+                content = doc.page_content
+                if content not in score_map:
+                    score_map[content] = [0.0, doc]
+                
+                score = 1.0 / (self.rrf_k + rank)
+                score_map[content][0] += score 
+        ranked = sorted(score_map.items(), key=lambda x: x[1][0], reverse=True)
+        
+        docs_with_scores = []
+        for _, (score, doc) in ranked:
+            doc.metadata['ranked_score'] = score
+            docs_with_scores.append(doc)
+        
+        return docs_with_scores
+    

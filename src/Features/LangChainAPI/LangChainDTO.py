@@ -5,6 +5,9 @@ from pydantic import BaseModel, Field
 
 config = load_env_yaml()
 
+#
+# PROMPT
+#
 class PromptType(StrEnum):
     NONE = "none"
     STREAM = "stream"
@@ -66,3 +69,12 @@ class ChunkResponse(BaseModel):
     content: str
     length: int
     metadata: Optional[Dict[str, Any]] = None
+
+class RagType(StrEnum):
+    MANUAL = "manual"
+    ABS = "abstract"
+
+class RagRequest(BaseModel):
+    query: str
+    rag_type: RagType
+

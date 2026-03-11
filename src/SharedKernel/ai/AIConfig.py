@@ -11,7 +11,7 @@ config = load_env_yaml()
 
 class AIConfig(ABC):
     @abstractmethod
-    def create_provider(self) -> Any:
+    def create_provider(self) -> BaseChatModel:
         pass
 
     @abstractmethod

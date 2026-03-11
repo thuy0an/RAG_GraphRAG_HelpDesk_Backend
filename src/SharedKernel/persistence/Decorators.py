@@ -47,7 +47,6 @@ def Service(implements: Optional[Type] = None):
             try:
                 return original_init(self, *args, **kwargs)
             except Exception as e:
-                # Log lỗi khởi tạo chi tiết
                 print(f"[DI Error] Initialization failed for {cls.__name__}: {e}")
                 raise
         cls.__init__ = validated_init

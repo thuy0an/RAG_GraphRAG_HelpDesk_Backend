@@ -5,7 +5,7 @@ from SharedKernel.ai.AIConfig import AIConfigFactory
 from fastapi import APIRouter, FastAPI, File, UploadFile
 from fastapi.responses import StreamingResponse
 from lagom import Container
-from Features.LangChainAPI.LangChainDTO import ChatMessageRequest, ChatRequest, ChatTechniqueRequest, ChatTemplateRequest, PromptType, TechType, TemplateType
+from Features.LangChainAPI.LangChainDTO import ChatMessageRequest, ChatRequest, ChatTechniqueRequest, ChatTemplateRequest, PromptType, RagRequest, RagType, TechType, TemplateType
 from SharedKernel.persistence.Decorators import Controller
 
 @Controller
@@ -109,6 +109,18 @@ class LangChainController:
                 media_type="text/event-stream"
             )
 
+        #
+        # AGENT
+        #
+        @self.router.post("/agents")
+        async def agent():
+            result = await langfacade.agent.search_oscar()
+
+            return StreamingResponse(
+                result,
+                media_type="text/event-stream"
+            )
+
         @self.router.post("/short_chat")
         async def short_chat(
             req: ChatMessageRequest
@@ -134,20 +146,31 @@ class LangChainController:
             )
         ...
 
-        @self.router.post("/document_pdf")
-        async def document_pdf(
+        @self.router.post("/load_document_pdf")
+        async def load_document_pdf(
             files: List[UploadFile] = File(...),
         ):
             for file in files:
                 await langfacade.SYN.ingest_pdf(file)
 
+        @self.router.post("/load_document_pdf_Pc")
+        async def load_document_pdf_Pc(
+            files: List[UploadFile] = File(...),
+        ):
+            for file in files:
+                await langfacade.SYN.ingest_pdf_Pc(file)
+
         @self.router.post("/search_document")
-        async def search_document(query: str):
-            result = await langfacade.SYN.call_rag(query)
-            return StreamingResponse(
-                result["answer"],
-                media_type="text/event-stream"
-            )
+        async def search_document(
+            query: str, 
+            rag_type: RagType
+        ):
+            req = RagRequest(query=query, rag_type=rag_type)
+            result = await langfacade.SYN.call_rag(req)
+            # return StreamingResponse(
+            #     result["answer"],
+            #     media_type="text/event-stream"
+            # )
             ...
             
     def tool_route(self):

@@ -1,5 +1,6 @@
 from typing import Any
 from Features.LangChainAPI.LangChainDTO import Callback
+from Features.LangChainAPI.service.AgentService import AgentService
 from Features.LangChainAPI.service.Synthesis import Synthesis
 from Features.LangChainAPI.service.MemoryService import MemoryService
 from Features.LangChainAPI.service.OutputService import OutputService
@@ -29,6 +30,7 @@ class LangChainFacade:
         self.tools = ToolService(self.provider, self.callbacks)
         self.output_parser = OutputService(self.provider, self.callbacks)
         self.memory = MemoryService(self.provider, self.callbacks)
+        self.agent = AgentService(self.provider, self.callbacks)
         self.SYN = Synthesis(self.ai_factory, self.provider, self.callbacks)
     
     async def ainvoke(self, provider: Any, req: Any):
