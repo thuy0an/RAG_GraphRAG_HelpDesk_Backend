@@ -20,23 +20,22 @@ def Transaction(func: Callable) -> Callable:
     async def wrapper(self, *args, **kwargs) -> Any:
         try:
             result = await func(self, *args, **kwargs)
-            await self.session.commit()
+            # await self.session.commit()
             print(f"Transaction committed - Session ID: {id(self.session)}")
             return result
         except Exception as e:
             await self.session.rollback()
             print(f"Transaction rolled back - Session ID: {id(self.session)}, Error: {e}")
             raise
-        finally:
-            await self.session.close()
-            print(f"Session closed - Session ID: {id(self.session)}")
+        # finally:
+        #     await self.session.close()
+        #     print(f"Session closed - Session ID: {id(self.session)}")
     return wrapper
 
 def Service(implements: Optional[Type] = None):
     def decorator(cls):
         cls.__di_type__ = "service"
         
-        # Lưu trữ interface target nếu có
         if implements:
             cls.__di_interface__ = implements
         

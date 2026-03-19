@@ -6,9 +6,6 @@ index:
   storage_type: hash
 
 fields:
-  - name: content
-    type: text
-
   - name: embedding
     type: vector
     attrs:
@@ -16,6 +13,8 @@ fields:
       algorithm: hnsw
       distance_metric: cosine
       datatype: float32
+  - name: text
+    type: text
 
   - name: source
     type: tag
@@ -40,3 +39,6 @@ fields:
 
   - name: content_length
     type: numeric
+
+  - name: parent_id
+    type: tag
