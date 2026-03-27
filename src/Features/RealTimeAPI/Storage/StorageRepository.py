@@ -61,5 +61,26 @@ class FileRepository(CrudRepository[Attachment, uuid.UUID]):
         exec_result = await self.fetch_one(exec_query, params)
         
         return exec_result
+
+    async def find_by_filename(self, filename: str):
+        """Tìm file theo tên chính xác (chưa bị delete)"""
+        query = """
+        SELECT * FROM Attachment 
+        WHERE file_name = :filename 
+        AND delete_at IS NULL
+        ORDER BY created_at DESC
+        LIMIT 1
+        """
+        return await self.fetch_one(query, {"filename": filename})
+
+    async def soft_delete_by_filename(self, filename: str):
+        """Soft delete file theo tên"""
+        query = """
+        UPDATE Attachment 
+        SET delete_at = NOW() 
+        WHERE file_name = :filename 
+        AND delete_at IS NULL
+        """
+        await self.execute(query, {"filename": filename})
     
 

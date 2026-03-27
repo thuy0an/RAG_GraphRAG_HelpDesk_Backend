@@ -6,10 +6,8 @@ from langchain_community.document_loaders import PlaywrightURLLoader, Unstructur
 from langchain_core.documents import Document
 
 class Loader:
-    def __init__(self, provider, callbacks) -> None:
-        self.provider = provider
-        self.callbacks = callbacks or {}
-    ...
+    def __init__(self) -> None:
+        ...
     
     def load_webpage(self, target_url: str):
         loader = PlaywrightURLLoader(
@@ -37,7 +35,8 @@ class Loader:
 
         loader = UnstructuredPDFLoader(
             temp_path,
-            mode="paged"
+            mode="paged",
+            # strategy="hi_res"
         )
         documents = loader.load()
         

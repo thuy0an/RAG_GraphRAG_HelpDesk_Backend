@@ -1,11 +1,13 @@
 import datetime
 import glob
+from io import BytesIO
 import mimetypes
 import os
 import shutil
 from typing import List
 import uuid6
 from fastapi import Depends, UploadFile, status
+from src.Features.LangChainAPI.LangChainFacade import LangChainFacade
 from src.Features.RealTimeAPI.Storage.FileDTO import FileSearchRequest, TypeStorage
 from src.Domain.base_entities import Attachment
 from SharedKernel.exception.APIException import APIException
@@ -19,22 +21,43 @@ config = load_env_yaml()
 
 class StorageService:
     def __init__(self, 
-        repo: FileRepository = Depends()
+        repo: FileRepository = Depends(),
+        langfacade: LangChainFacade = Depends()
+
     ):
         self.STORAGE_PREFIX  = "api/v1/storage/files" 
         self.repo = repo
+        self.langfacade = langfacade
 
     async def get_all_files(self, req: FileSearchRequest):
         return await self.repo.search_files(req)
         pass
     
-    async def save_files(self,
-        files: List[UploadFile]
-    ):
+    async def save_files(self, files: List[UploadFile]):
         attachment_urls = []
+        overwritten_files = []
+        
         for file in files:
-            attachment = Attachment()
+            # Check existing file by name
+            existing_file = await self.repo.find_by_filename(file.filename)
+            print(existing_file)
 
+            if existing_file:
+                logger.info(f"Found existing file: {file.filename}, deleting...")
+                
+                # Delete from filesystem
+                old_file_path = self._get_file_path(str(existing_file['id']), existing_file['file_name'])
+                if os.path.exists(old_file_path):
+                    os.remove(old_file_path)
+                    logger.info(f"Deleted file from disk: {old_file_path}")
+                
+                # Soft delete from database
+                existing_file['delete_at'] = datetime.datetime.now()
+                await self.repo.soft_delete_by_filename(file.filename)
+                overwritten_files.append(file.filename)
+            
+            # Save new file
+            attachment = Attachment()
             new_id = uuid6.uuid7()
             file_name = os.path.splitext(file.filename)[0]
             file_ext = os.path.splitext(file.filename)[1]
@@ -42,9 +65,13 @@ class StorageService:
             
             file_path = self._get_file_path(str(new_id), filename)
 
+            content = await file.read()
             with open(file_path, "wb") as f:
-                content = await file.read()
                 f.write(content)
+
+            # Reset con trỏ file về đầu để ingest
+            await file.seek(0)
+            await self.langfacade.synthesizer.ingest_pdf_PaC(file)
 
             attachment.id = new_id
             attachment.file_name = filename
@@ -59,9 +86,9 @@ class StorageService:
             attachment_urls.append(attachment.url)
 
         return {
-            "urls": attachment_urls
+            "urls": attachment_urls,
+            "overwritten": overwritten_files
         }
-    ...
             
     async def get_file_by_id(self, file_id: str, file_name: str = None):
         file = await self.repo.find_by_id(file_id)
@@ -120,6 +147,8 @@ class StorageService:
 
         file.delete_at = datetime.datetime.now()
         await self.repo.save(file)
+
+        await self.langfacade.synthesizer.delete_document_by_file_name(file.file_name)
 
     def _get_file_path(self, folder_storage: str, filename: str):
         full_path = os.path.join("./static", folder_storage, filename)

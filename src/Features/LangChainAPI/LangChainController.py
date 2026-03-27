@@ -1,11 +1,14 @@
-from typing import List
+from typing import List, Optional
+
+from pydantic import BaseModel
 from Features.LangChainAPI.LangChainFacade import LangChainFacade
 from Features.LangChainAPI.LangTools import LangTools
 from SharedKernel.ai.AIConfig import AIConfigFactory
-from fastapi import APIRouter, Depends, FastAPI, File, UploadFile
+from fastapi import APIRouter, Body, Depends, FastAPI, File, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
 from Features.LangChainAPI.LangChainDTO import ChatMessageRequest, ChatRequest, ChatTechniqueRequest, ChatTemplateRequest, PromptType, RagRequest, RagType, TechType, TemplateType
 from SharedKernel.persistence.Decorators import Controller
+from src.SharedKernel.base.APIResponse import APIResponse
 
 @Controller
 class LangChainController:
@@ -25,41 +28,37 @@ class LangChainController:
         self.app.include_router(self.router)
         self.app.include_router(self.tool_router)
 
-    def register_route(self):
-
-        @self.router.post("/chat")
-        async def chat_with_ai(
-            req: ChatRequest,
-            prompt_type: PromptType = PromptType.NONE,
+    def register_route(self):        
+        @self.router.post("/long_chat")
+        async def long_chat(
+            req: ChatMessageRequest,
             langfacade: LangChainFacade = Depends()
         ):
-            async def handle_none(req):
-                return await langfacade.prompt.aprompt(req)
-
-            async def handle_stream(req):
-                result = await langfacade.prompt.asprompt(req)
-                return StreamingResponse(
-                    result["content"],
-                    media_type="text/event-stream"
-                )
-
-            prompt_dict = {
-                PromptType.NONE: handle_none,
-                PromptType.STREAM: handle_stream
-            }
-
-            handler = prompt_dict.get(prompt_type)
-            if handler is None:
-                raise ValueError(f"Invalid prompt type: {prompt_type}")
-            return await handler(req)
-
-        @self.router.post("/update_doc")
-        async def load_document_pdf(
-            files: List[UploadFile] = File(...),
+            """Long chat với streaming responses"""
+            return StreamingResponse(
+                await langfacade.memory_service.long_chat(req),
+                media_type="text/event-stream"
+            )
+        
+        class ChatHistoryRequest(BaseModel):
+            page_number: Optional[int] = 1
+            page_size: Optional[int] = 10
+            
+        @self.router.get("/chat_history/{session_id}")
+        async def get_chat_history(
+            session_id: str,
             langfacade: LangChainFacade = Depends()
         ):
-            for file in files:
-                await langfacade.SYN.update_docs(file)
+            """Get paginated chat history for a session"""
+            response = await langfacade.synthesizer.memory_repo.get_history_all(
+                session_id=session_id,
+            )
+            
+            return APIResponse(
+                message="Chat history retrieved successfully",
+                status_code=status.HTTP_200_OK,
+                data=response
+            )
 
         @self.router.post("/load_document_pdf_PaC")
         async def load_document_pdf_PaC(
@@ -67,18 +66,39 @@ class LangChainController:
             langfacade: LangChainFacade = Depends()
         ):
             for file in files:
-                await langfacade.SYN.ingest_pdf_PaC(file)
+                await langfacade.synthesizer.ingest_pdf_PaC(file)
 
-        @self.router.post("/search_document")
-        async def search_document(
-            query: str, 
-            rag_type: RagType,
+            return APIResponse(
+                message=f"Successfully processed {len(files)} PDF file(s)",
+                status_code=status.HTTP_200_OK,
+                data=None
+            )
+        
+        class DeleteDocumentRequest(BaseModel):
+            filename: str
+        @self.router.delete("/delete_document")
+        async def delete_document(
+            req: DeleteDocumentRequest, 
             langfacade: LangChainFacade = Depends()
         ):
-            req = RagRequest(query=query, rag_type=rag_type)
-            response = await langfacade.SYN.call_rag(req)
+            await langfacade.synthesizer.delete_document_by_file_name(req.filename)
+            return APIResponse(
+                message=f"Delete successfully",
+                status_code=status.HTTP_200_OK,
+                data=None
+            )
+            ...
+
+        class RetrieveDocumentRequest(BaseModel):
+            query: str
+            session_id: str
+        @self.router.post("/retrieve_document")
+        async def retrieve_document(
+            req: RetrieveDocumentRequest, 
+            langfacade: LangChainFacade = Depends()
+        ):           
             return StreamingResponse(
-                response.content,
+                await langfacade.synthesizer.rag_PaC(req.query, req.session_id),
                 media_type="text/event-stream"
             )
             ...

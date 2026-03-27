@@ -27,7 +27,14 @@ fields:
 
   - name: page_number
     type: numeric
-    
+  
+  ###v2
+  - name: pages
+    type: tag
+
+  - name: page_span
+    type: tag
+  ####
   - name: chunk_index
     type: numeric
 
@@ -42,3 +49,4 @@ fields:
 
   - name: parent_id
     type: tag
+

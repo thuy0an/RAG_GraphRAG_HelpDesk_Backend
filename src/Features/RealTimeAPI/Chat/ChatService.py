@@ -10,9 +10,9 @@ from src.Features.RealTimeAPI.Chat.ChatRepository import ChatRepository
 from fastapi import Depends, WebSocket, WebSocketDisconnect, status
 from src.Features.RealTimeAPI.Storage.StorageService import StorageService
 from src.Features.RealTimeAPI.Storage.FileDTO import TypeStorage
-from src.SharedKernel.Utils import Utils
 from src.SharedKernel.exception.APIException import APIException
 from src.SharedKernel.socket.SocketManager import SocketManager
+from src.SharedKernel.utils.Utils import Utils
 
 def get_socket_manager() -> SocketManager:
     return SocketManager()
@@ -71,8 +71,6 @@ class ChatService:
         if conversation_key == "None" and customer_care_agent_id is not None:
             conversation_key = Utils.generate_conversation_key(user_id, customer_care_agent_id)
             print(f"Generated conversation key: {conversation_key}")
-
-        # await websocket.accept() 
         try:
             await self.socket_manager.connect(websocket, conversation_key, user_id)
 
@@ -117,8 +115,6 @@ class ChatService:
             response = { "content": f"User {user_id} left the chat" }
             json_res = json.dumps(response)
         ...
-
-
 
     async def send_message(self, req: MessageRequest):
         message = Messages(

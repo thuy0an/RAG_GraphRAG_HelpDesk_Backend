@@ -32,7 +32,6 @@ YOUTUBE_DESCRIPTION = {
 }
 
 def PaC_template(context, query):
-  print(context)
   system_prompt = """
   Bạn là trợ lý AI chuyên nghiệp.
 

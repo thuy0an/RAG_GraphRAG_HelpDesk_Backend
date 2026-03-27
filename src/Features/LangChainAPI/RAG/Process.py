@@ -15,13 +15,8 @@ law_separators=[
     "\n"
 ]
 class Process:
-    def __init__(self,         
-        provider: BaseChatModel, 
-        callbacks: Callback
-    ) -> None:
-        self.provider = provider
-        self.callbacks = callbacks or {}
-    ...
+    def __init__(self) -> None:
+        ...
 
     def _split_docs(self, text: str):
         text_splitter = RecursiveCharacterTextSplitter(
@@ -53,8 +48,7 @@ class Process:
             for chunk in page_chunks:
                 ...
         ...
-    def _split_docs_PaC(self, docs_PaC: dict[str, Any]):
-        ...
+    
     def split_PaC(self, docs: List[Document]):
         parent_chunks = []
         child_chunks = []
@@ -86,10 +80,11 @@ class Process:
             add_start_index=True
         )
         child_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1024,
+            chunk_size=512,
             chunk_overlap=102,
             separators=law_separators,
-            is_separator_regex=True
+            is_separator_regex=True,
+            add_start_index=True
         )
         
         parent_docs = parent_splitter.create_documents([full_text])
@@ -130,3 +125,87 @@ class Process:
             "parent"   : parent_chunks,
             "children" : child_chunks
         }
+
+    def split_PaC_v2(self, docs: List[Document]):
+        full_text = ""
+        page_map = []
+        cursor = 0
+
+        for doc in docs:
+            text = doc.page_content
+            start = cursor
+            end = cursor + len(text)
+
+            page_map.append({
+                "start": start,
+                "end": end,
+                "page_number": doc.metadata["page_number"]
+            })
+
+            full_text += text + "\n"
+            cursor = end + 1
+
+        parent_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=2048,
+            chunk_overlap=400,
+            separators=law_separators,
+            add_start_index=True
+        )
+
+        child_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=512,
+            chunk_overlap=100,
+            separators=law_separators,
+            add_start_index=True
+        )
+
+        parent_docs = parent_splitter.create_documents([full_text])
+
+        parent_chunks = []
+        child_chunks = []
+
+        for idx, parent in enumerate(parent_docs):
+
+            start_index = parent.metadata["start_index"]
+            end_index = start_index + len(parent.page_content)
+
+            pages = set()
+
+            for p in page_map:
+                if not (end_index < p["start"] or start_index > p["end"]):
+                    pages.add(p["page_number"])
+
+            pages = sorted(list(pages)) if pages else [1]
+            pages_str = [str(p) for p in pages]
+
+            parent_id = f"parent_docs:{docs[0].metadata['source']}:{idx}"
+
+            parent.metadata = {
+                "parent_id": parent_id,
+                "pages": pages_str,  
+                "page_span": f"{pages[0]}-{pages[-1]}",
+                "source": docs[0].metadata["source"]
+            }
+
+            parent_chunks.append(parent)
+
+            children = child_splitter.split_documents([parent])
+
+            for i, child in enumerate(children):
+                child.metadata = {
+                    "parent_id": parent_id,
+                    "pages": pages_str,
+                    "page_span": parent.metadata["page_span"],
+                    "source": parent.metadata["source"],
+                    "chunk_index": i,
+                    "total_chunks": len(children),
+                    "content_length": len(child.page_content)
+                }
+
+                child_chunks.append(child)
+
+        return {
+            "parent": parent_chunks,
+            "children": child_chunks
+        }
+        ...

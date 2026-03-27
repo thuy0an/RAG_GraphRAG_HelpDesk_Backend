@@ -38,6 +38,7 @@ class QueryExtension:
         SELECT {select_clause}
         {self._base}
         {where_clause}
+        {self._order}
         {self._limit}
         """
 

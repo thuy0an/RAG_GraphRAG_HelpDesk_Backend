@@ -45,32 +45,6 @@ class MYSQLManager(IPersistenceManager):
 
     pass
 
-# class PostgreManager(IPersistenceManager):
-#     def __init__(self) -> None:
-#         self.DATABASE_URL = config.database.mysql.url
-#         print("Postgre ...")
-#         self.engine = create_async_engine(
-#             self.DATABASE_URL, 
-#             echo=True, 
-#             pool_pre_ping=True
-#         )
-        
-#         self.async_session = async_sessionmaker(
-#             bind=self.engine, 
-#             class_=AsyncSession, 
-#             expire_on_commit=False
-#         )
-
-#         ...
-    
-#     def get_engine(self) -> AsyncEngine:
-#         return self.engine
-
-#     def get_async_session(self) -> AsyncSession:
-#         return self.async_session()
-
-#     pass
-
 class PersistenceManagerFactory():
     _registry: Dict[str, Type[IPersistenceManager]] = {}
 
