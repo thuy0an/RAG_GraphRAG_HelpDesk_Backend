@@ -5,7 +5,7 @@ from Features.LangChainAPI.LangChainDTO import Callback
 from SharedKernel.ai.AIConfig import AIConfigFactory
 from SharedKernel.persistence.Decorators import Service
 from SharedKernel.utils.yamlenv import load_env_yaml
-from src.Features.LangChainAPI.RAG.Synthesis import Synthesis
+from src.Features.LangChainAPI.RAG.Synthesizer import Synthesizer
 from src.Features.LangChainAPI.service.AgentService import AgentService
 from src.Features.LangChainAPI.service.PromptService import PromptService
 from src.Features.LangChainAPI.service.CrawlService import CrawlService
@@ -26,10 +26,10 @@ class LangChainFacade:
             astream=self.astream
         )
         
-        self.prompt = PromptService(self.provider, self.callbacks)
-        self.agent = AgentService(self.provider)
-        self.crawler = CrawlService()
-        self.SYN = Synthesis(self.ai_factory, self.provider, self.callbacks)
+        self.prompt_service = PromptService()
+        self.agent_service = AgentService()
+        self.crawler_service = CrawlService()
+        self.synthesizer = Synthesizer(self.ai_factory, self.provider)
     
     async def ainvoke(self, provider: Any, req: Any):
         result = await provider.ainvoke(req)

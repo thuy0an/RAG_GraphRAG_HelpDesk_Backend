@@ -1,16 +1,173 @@
-import re
-from typing import List
 from pathlib import Path
 from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage
-from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.runnables import RunnableWithMessageHistory
-from langchain.agents.middleware import SummarizationMiddleware
 from langchain_core.tools import tool
-from pydantic import BaseModel, Field
 from langchain_community.chat_message_histories import SQLChatMessageHistory
+from langchain_ollama import ChatOllama
 from sqlalchemy import create_engine
-from sqlalchemy.ext.asyncio import create_async_engine
+
+class AgentService:
+
+    def __init__(self):
+        self.url = self._create_file(".data", "test_chat.db")
+        self.engine = create_engine(f"sqlite:///{self.url}")
+        ...
+
+    async def write_narrative(self, description: str):
+        instruction = """
+        Bạn là một tác giả tiểu thuyết tài năng và cũng là nhà lập kế hoạch xuất sắc.
+
+        NHIỆM VỤ:
+        Dựa trên mô tả câu chuyện của người dùng, hãy thực hiện tuần tự 2 bước trong cùng một phản hồi:
+
+        BƯỚC 1: LẬP KẾ HOẠCH (PLANNING)
+        - Phân tích ý tưởng
+        - Tạo Outline chi tiết gồm: Bối cảnh, Nhân vật, Mâu thuẫn, Các bước phát triển, Cao trào, Kết thúc.
+        - Định dạng: Danh sách đánh số rõ ràng.
+
+        BƯỚC 2: VIẾT TRUYỆN (WRITING)
+        - Dựa ngay vào Outline ở Bước 1.
+        - Viết nội dung truyện ngắn hoàn chỉnh, có cảm xúc, mạch lạc.
+        - Đảm bảo văn phong tiểu thuyết hấp dẫn.
+
+        QUY TẮC QUAN TRỌNG:
+        - KHÔNG dừng lại sau khi viết Outline. Hãy viết luôn cả phần truyện.
+        - Sử dụng dấu phân cách rõ ràng giữa phần Outline và phần Truyện (ví dụ: "--- PHẦN TRUYỆN ---").
+        - Ngôn ngữ: Tiếng Việt.
+        - Trả lời ngắn gọn.
+        - Truyện tối đa 500 từ
+        """
+
+        agent_novel = create_agent(
+            model=self.provider, 
+            system_prompt=instruction
+        )
+
+        user_input = f"Tạo outline và viết truyện dựa trên mô tả sau: {description}"
+
+        stream = agent_novel.astream({
+            "messages": [HumanMessage(content=user_input)]
+        })
+        async for event in stream:
+            if "model" in event:
+                for msg in event["model"]["messages"]:
+                    if not msg.content:
+                        continue
+                    yield msg.content
+        ...
+
+    async def take_note(self, session_id: str, query: str):
+        provider = ChatOllama(
+            model="hf.co/unsloth/Qwen3-4B-Instruct-2507-GGUF:Q4_K_M",
+            base_url="http://localhost:11434"
+        )
+
+        system_prompt = """
+        Bạn là AI ghi chú.
+
+        Quy tắc:
+
+        1. Nếu người dùng viết:
+        [GHI CHÚ]: nội dung
+        -> trả lời: đã lưu ghi chú thành công
+
+        2. Nếu người dùng viết:
+        [HỎI]: câu hỏi
+        -> tìm thông tin trong các ghi chú trước đó.
+
+        3. Nếu tìm thấy thông tin phù hợp
+        -> trả lời bằng nội dung ghi chú.
+
+        4. Nếu không có thông tin
+        -> trả lời: không có thông tin
+
+        5. Nếu người dùng không dùng [GHI CHÚ] hoặc [HỎI]
+        -> trả lời: Vui lòng hãy ghi chú bằng cú pháp [GHI CHÚ]: <nội dung ghi chú>
+        """
+
+        agent = create_agent(
+            model=provider,
+            system_prompt=system_prompt
+        )
+
+        agent_with_history = RunnableWithMessageHistory(
+            agent,
+            self._get_history,
+            input_messages_key="messages"
+        )
+
+        result = agent_with_history.invoke(
+            {
+                "messages": [
+                    HumanMessage(content=query)
+                ]
+            },
+            config={
+                "configurable": {
+                    "session_id": session_id
+                }
+            }
+        )
+
+        return result["messages"][-1].content
+    
+    def _get_history(self, session_id: str):
+        print("SESSION:", session_id)
+        return SQLChatMessageHistory(
+            session_id=session_id,
+            connection=self.engine
+        ) 
+    def _create_file(self, path: str, name: str):
+        full_path = Path(path).resolve() / name
+        full_path.parent.mkdir(parents=True, exist_ok=True)
+        if not full_path.exists():
+            try:
+                full_path.touch()
+                print(f"File created: {full_path}")
+            except OSError as e:
+                raise ValueError(f"Cannot create file: {e}")
+        return str(full_path)
+
+    async def search_multi_domain(self, query: str):
+        provider = ChatOllama(
+            model="hf.co/unsloth/Qwen3-4B-Instruct-2507-GGUF:Q4_K_M",
+            base_url="http://localhost:11434"
+        )
+
+        agent = create_agent(
+            model=provider,
+            tools=[
+                tool_qua_bong_vang,
+                tool_anime,
+                get_oscar_nominations_2026
+            ],
+            system_prompt="""
+                Bạn là trợ lý AI hỗ trợ tìm kiếm đa lĩnh vực.
+
+                Nếu câu hỏi liên quan:
+                - Oscar → dùng tool get_oscar_nominations_2026
+                - Anime → dùng tool tool_anime
+                - Quả bóng vàng → dùng tool tool_qua_bong_vang
+
+                Nếu không liên quan đến các lĩnh vực trên → trả lời: "Xin lỗi, tôi không thể trả lời câu hỏi này."
+                Ngôn ngữ: Tiếng Việt
+                """
+        )
+
+        stream = agent.astream(
+            {"messages": [{"role": "user", "content": query}]}
+        )
+
+        async for event in stream:
+
+            if "model" in event:
+                for msg in event["model"]["messages"]:
+
+                    if not msg.content:
+                        continue
+
+                    yield msg.content
 
 @tool
 def tool_qua_bong_vang():
@@ -65,155 +222,3 @@ def get_oscar_nominations_2026():
     ]
 
     return ranking
-
-
-class AgentService:
-
-    def __init__(self, provider):
-        self.provider = provider
-        self.url = self._create_file(".data", "chat_history.db")
-        self.engine = create_engine(f"sqlite:///{self.url}")
-
-    async def write_narrative(self, description: str):
-        instruction = """
-        Bạn là một tác giả tiểu thuyết tài năng và cũng là nhà lập kế hoạch xuất sắc.
-
-        NHIỆM VỤ:
-        Dựa trên mô tả câu chuyện của người dùng, hãy thực hiện tuần tự 2 bước trong cùng một phản hồi:
-
-        BƯỚC 1: LẬP KẾ HOẠCH (PLANNING)
-        - Phân tích ý tưởng
-        - Tạo Outline chi tiết gồm: Bối cảnh, Nhân vật, Mâu thuẫn, Các bước phát triển, Cao trào, Kết thúc.
-        - Định dạng: Danh sách đánh số rõ ràng.
-
-        BƯỚC 2: VIẾT TRUYỆN (WRITING)
-        - Dựa ngay vào Outline ở Bước 1.
-        - Viết nội dung truyện ngắn hoàn chỉnh, có cảm xúc, mạch lạc.
-        - Đảm bảo văn phong tiểu thuyết hấp dẫn.
-
-        QUY TẮC QUAN TRỌNG:
-        - KHÔNG dừng lại sau khi viết Outline. Hãy viết luôn cả phần truyện.
-        - Sử dụng dấu phân cách rõ ràng giữa phần Outline và phần Truyện (ví dụ: "--- PHẦN TRUYỆN ---").
-        - Ngôn ngữ: Tiếng Việt.
-        - Trả lời ngắn gọn.
-        - Truyện tối đa 500 từ
-        """
-
-        agent_novel = create_agent(
-            model=self.provider, 
-            system_prompt=instruction
-        )
-
-        user_input = f"Tạo outline và viết truyện dựa trên mô tả sau: {description}"
-
-        stream = agent_novel.astream({
-            "messages": [HumanMessage(content=user_input)]
-        })
-        async for event in stream:
-            if "model" in event:
-                for msg in event["model"]["messages"]:
-                    if not msg.content:
-                        continue
-                    yield msg.content
-        ...
-
-    async def take_note(self, session_id: str, query: str):
-        system_prompt = """
-        Bạn là AI ghi chú.
-
-        Quy tắc:
-
-        1. Nếu người dùng viết:
-        [GHI CHÚ]: nội dung
-        -> trả lời: đã lưu ghi chú thành công
-
-        2. Nếu người dùng viết:
-        [HỎI]: câu hỏi
-        -> tìm thông tin trong các ghi chú trước đó.
-
-        3. Nếu tìm thấy thông tin phù hợp
-        -> trả lời bằng nội dung ghi chú.
-
-        4. Nếu không có thông tin
-        -> trả lời: không có thông tin
-
-        5. Nếu người dùng không dùng [GHI CHÚ] hoặc [HỎI]
-        -> trả lời: Vui lòng hãy ghi chú bằng cú pháp [GHI CHÚ]: <nội dung ghi chú>
-        """
-
-        agent = create_agent(
-            model=self.provider,
-            system_prompt=system_prompt
-        )
-
-        agent_with_history = RunnableWithMessageHistory(
-            agent,
-            self._get_history,
-            input_messages_key="messages"
-        )
-
-        result = agent_with_history.invoke(
-            {
-                "messages": [
-                    HumanMessage(content=query)
-                ]
-            },
-            config={
-                "configurable": {
-                    "session_id": session_id
-                }
-            }
-        )
-
-        return result["messages"][-1].content
-    def _get_history(self, session_id: str):
-        print("SESSION:", session_id)
-        return SQLChatMessageHistory(
-            session_id=session_id,
-            connection=self.engine
-        ) 
-    def _create_file(self, path: str, name: str):
-        full_path = Path(path).resolve() / name
-        full_path.parent.mkdir(parents=True, exist_ok=True)
-        if not full_path.exists():
-            try:
-                full_path.touch()
-                print(f"File created: {full_path}")
-            except OSError as e:
-                raise ValueError(f"Cannot create file: {e}")
-        return str(full_path)
-
-    async def search_multi_domain(self, query: str):
-        agent = create_agent(
-            model=self.provider,
-            tools=[
-                tool_qua_bong_vang,
-                tool_anime,
-                get_oscar_nominations_2026
-            ],
-            system_prompt="""
-                Bạn là trợ lý AI hỗ trợ tìm kiếm đa lĩnh vực.
-
-                Nếu câu hỏi liên quan:
-                - Oscar → dùng tool get_oscar_nominations_2026
-                - Anime → dùng tool tool_anime
-                - Quả bóng vàng → dùng tool tool_qua_bong_vang
-
-                Nếu không liên quan đến các lĩnh vực trên → trả lời: "Xin lỗi, tôi không thể trả lời câu hỏi này."
-                Ngôn ngữ: Tiếng Việt
-                """
-        )
-
-        stream = agent.astream(
-            {"messages": [{"role": "user", "content": query}]}
-        )
-
-        async for event in stream:
-
-            if "model" in event:
-                for msg in event["model"]["messages"]:
-
-                    if not msg.content:
-                        continue
-
-                    yield msg.content

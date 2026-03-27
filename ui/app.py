@@ -11,7 +11,7 @@ class App:
     def __init__(self):
         self.page = st.sidebar.selectbox(
             "Select page",
-            ["Chatbot", "Game Awards QA", "Create Blog", "Convert to JSON", "Novel Agent", "Take note", "Multi-domain Search"]
+            ["Chatbot", "Game Awards QA", "Create Blog", "Convert to JSON", "Novel Agent", "Take note", "Multi-domain Search", "RAG"]
         )
     def run(self):
         if self.page == "Chatbot":
@@ -28,29 +28,20 @@ class App:
             self.take_note_component()
         elif self.page == "Multi-domain Search":
             self.multi_domain_search_component()
+        elif self.page == "RAG":
+            self.rag_component()
 
     def chatbot_component(self):
 
-        st.header("Chatbot")
+        st.header("Hello from Chatbot")
 
-        prompt_type = st.selectbox("Mode", ["none", "stream"])
-        message = st.text_input("Prompt:")
+        if st.button("check", type="primary"):
 
-        if st.button("Send", type="primary"):
-
-            url = f"{self.BASE_URL}/bai_tap/chat_with_ai?prompt_type={prompt_type}"
-
-            payload = {
-                "message": message
-            }
+            url = f"{self.BASE_URL}/bai_tap/chat"
             with st.spinner("loading..."):
                 try:
-                    if prompt_type == "none":
-                        response = self.api_service(url, payload)
-                        st.write(response)
-                    else:
-                        response = self.api_stream_service(url, payload)
-                        st.write_stream(response)
+                    response = self.api_stream_service(url, "")
+                    st.write_stream(response)
                 except Exception as e:
                     st.error(f"Error: {e}")
 
@@ -218,7 +209,399 @@ class App:
             except Exception as e:
                 st.error(f"Error: {e}")
 
-    # Service
+    #
+    # RAG COMPONENT
+    #
+    def get_chat_history_from_api(self, session_id):
+        """Lấy lịch sử chat từ API"""
+        try:
+            response = requests.get(
+                f"{self.BASE_URL}/langchain/chat_history/{session_id}",
+                timeout=30
+            )
+            if response.status_code == 200:
+                data = response.json()
+                if data.get('data'):
+                    return data['data']
+                return []
+            else:
+                st.error(f"Error loading chat history: {response.status_code}")
+                return []
+        except Exception as e:
+            st.error(f"Connection error: {str(e)}")
+            return []
+
+    def session_management_component(self):
+        """Simple session management - KISS principle"""
+        st.subheader("🔑 Session Management")
+        session_id = st.text_input(
+            "Session ID",
+            value="test",
+            placeholder="Enter session ID (e.g., user_1, session_abc)",
+            help="Session ID persists your chat history"
+        )
+        if session_id:
+            st.success(f"✅ Active Session: `{session_id}`")
+            return session_id
+        else:
+            st.warning("⚠️ Please enter a session ID")
+            return None
+
+    def chat_history_component(self, session_id, pending_query=None):
+        """Hiển thị lịch sử chat và xử lý streaming response"""
+        if not session_id:
+            st.info("⚠️ No session ID. Start a conversation to see history.")
+            return
+        
+        # Load existing chat history
+        with st.spinner("Loading chat history..."):
+            messages = self.get_chat_history_from_api(session_id)
+        
+        # Show message count or empty state
+        if not messages and not pending_query:
+            st.info("📭 No chat history yet. Start a conversation!")
+            return
+        
+        if messages:
+            st.subheader(f"💬 Chat History ({len(messages)} messages)")
+        
+        # Add custom CSS for scrollable container with smooth scrolling
+        st.markdown("""
+        <style>
+        .stContainer {
+            overflow-y: auto !important;
+            scroll-behavior: smooth;
+            -webkit-overflow-scrolling: touch;
+        }
+        .stContainer::-webkit-scrollbar {
+            width: 8px;
+        }
+        .stContainer::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 4px;
+        }
+        .stContainer::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 4px;
+        }
+        .stContainer::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+        
+        chat_container = st.container(height=400)
+        with chat_container:
+            # Display existing messages
+            for msg in messages:
+                role = msg.get('role', 'unknown')
+                content = msg.get('content', '')
+                timestamp = msg.get('timestamp', '')
+                if role == 'user':
+                    with st.chat_message("user"):
+                        st.write(content)
+                        if timestamp:
+                            st.caption(f"🕐 {timestamp}")
+                elif role == 'assistant':
+                    with st.chat_message("assistant"):
+                        st.write(content)
+                        if timestamp:
+                            st.caption(f"🕐 {timestamp}")
+            
+            # Handle pending query - show user message and stream AI response
+            if pending_query:
+                # Show user message immediately
+                with st.chat_message("user"):
+                    st.write(pending_query)
+                
+                # Stream AI response within chat history
+                with st.chat_message("assistant"):
+                    message_placeholder = st.empty()
+                    full_response = ""
+                    try:
+                        with st.spinner("AI is thinking..."):
+                            response = self.api_stream_service(
+                                f"{self.BASE_URL}/langchain/retrieve_document",
+                                {"query": pending_query, "session_id": session_id}
+                            )
+                            for chunk in response:
+                                if chunk:
+                                    full_response += chunk
+                                    message_placeholder.write(full_response)
+                        # st.success("✅ Response generated successfully!")
+                    except Exception as e:
+                        st.error(f"❌ Error: {str(e)}")
+                        message_placeholder.write("Sorry, I encountered an error. Please try again.")
+
+    def rag_chat_component(self):
+        """RAG chat component với session management and history"""
+        st.header("💬 RAG Chat with Document Context")
+        session_id = self.session_management_component()
+        if not session_id:
+            st.warning("⚠️ Please create or enter a session ID to start chatting")
+            return
+        
+        st.divider()
+        
+        # Lấy query từ lần render trước (nếu có)
+        pending_query = st.session_state.get("rag_pending_query", None)
+        
+        # Hiển thị chat history với pending query
+        self.chat_history_component(session_id, pending_query=pending_query)
+        
+        # Xóa pending query sau khi đã xử lý
+        if pending_query:
+            del st.session_state.rag_pending_query
+        
+        # Chat input - luôn nằm dưới cùng
+        query = st.chat_input(
+            "Ask a question about your uploaded documents...",
+            key="rag_chat_input"
+        )
+        
+        # Lưu query vào session_state và rerun để xử lý
+        if query:
+            st.session_state.rag_pending_query = query
+            st.rerun()
+
+    def rag_component(self):
+        """Enhanced RAG component với chat interface and document management"""
+        st.header("RAG - Retrieval Augmented Generation")
+        tab1, tab2 = st.tabs(["📁 Documents", "💬 Chat"])
+        with tab1:
+            with st.expander("📤 Upload PDF Documents", expanded=True):
+                self.pdf_upload_component()
+            st.divider()
+            self.pdf_file_list_component()
+        with tab2:
+            self.rag_chat_component()
+
+    def pdf_upload_component(self):
+        st.subheader("📤 Upload PDF Documents")
+
+        with st.form("upload_form"):
+            files = st.file_uploader(
+                "Chọn PDF files để upload",
+                type=["pdf"],
+                accept_multiple_files=True,
+                key="pdf_uploader"
+            )
+            submitted = st.form_submit_button("📤 Upload PDF Files")
+
+        if submitted and files:
+            with st.spinner("Đang upload PDF..."):
+                self.upload_pdf_files(files)
+
+
+    def upload_pdf_files(self, files):
+        """Upload PDF files với progress tracking"""
+        total_files = len(files)
+        uploaded_files = []
+        failed_files = []
+
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+
+        for i, file in enumerate(files):
+            status_text.text(f"Đang upload: {file.name}...")
+            progress_bar.progress((i + 1) / total_files)
+
+            try:
+                if file.type != "application/pdf":
+                    failed_files.append(f"{file.name}: Not a PDF")
+                    continue
+
+                files_data = [
+                    ("files", (file.name, file.getvalue(), file.type))
+                ]
+
+                response = requests.post(
+                    f"{self.BASE_URL}/storage/files/upload",
+                    files=files_data,
+                    timeout=120
+                )
+
+                if response.status_code == 200:
+                    uploaded_files.append(file.name)
+                else:
+                    failed_files.append(f"{file.name}: {response.text}")
+
+            except Exception as e:
+                failed_files.append(f"{file.name}: {str(e)}")
+
+        status_text.text("✅ Upload hoàn tất!")
+        self.show_pdf_upload_results(uploaded_files, failed_files)
+
+
+    def show_pdf_upload_results(self, uploaded, failed):
+        """Hiển thị kết quả upload"""
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.metric("✅ Thành công", len(uploaded))
+
+        with col2:
+            st.metric("❌ Thất bại", len(failed))
+
+        if uploaded:
+            # st.success("Upload thành công:")
+            for f in uploaded:
+                st.write(f"📕 {f}")
+
+        if failed:
+            st.error("Upload thất bại:")
+            for f in failed:
+                st.write(f"❌ {f}")
+
+        if uploaded:
+            st.cache_data.clear()
+            st.toast(f"✅ Upload {len(uploaded)} file thành công")
+
+
+    def format_file_size(self, size_bytes):
+        """Format file size in human readable format"""
+        if size_bytes == 0:
+            return "0B"
+
+        size_names = ["B", "KB", "MB", "GB", "TB"]
+        i = 0
+        while size_bytes >= 1024 and i < len(size_names) - 1:
+            size_bytes /= 1024.0
+            i += 1
+
+        return f"{size_bytes:.1f} {size_names[i]}"
+
+
+    @staticmethod
+    @st.cache_data(ttl=60, show_spinner=False)
+    def _fetch_pdf_files_cached(base_url, page, page_size):
+        """Cached static method to fetch PDF files"""
+        try:
+            response = requests.get(
+                f"{base_url}/storage/files",
+                params={"page": page, "page_size": page_size},
+                timeout=30
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+
+                if data.get("data") and isinstance(data["data"], dict):
+                    all_files = data["data"].get("content", [])
+                    pdf_files = [
+                        f for f in all_files
+                        if f.get("file_name", "").lower().endswith(".pdf")
+                    ]
+
+                    return {
+                        "files": pdf_files,
+                        "total": len(pdf_files),
+                        "page": page,
+                        "page_size": page_size
+                    }
+
+                return {"files": [], "total": 0}
+            else:
+                return None
+        except Exception:
+            return None
+
+    def get_pdf_files_from_api(self, page=1, page_size=20):
+        """Lấy danh sách PDF files từ API (with caching)"""
+        return self._fetch_pdf_files_cached(self.BASE_URL, page, page_size)
+
+
+    def pdf_file_list_component(self):
+        """Hiển thị danh sách PDF files đơn giản"""
+        st.subheader("📁 Danh sách PDF Files")
+
+        page_size = st.selectbox("PDFs/page", [10, 20, 50], index=1, key="page_size_select")
+        current_page = st.number_input("Page", min_value=1, value=1, step=1, key="page_input")
+
+        files_data = self.get_pdf_files_from_api(int(current_page), int(page_size))
+        has_files = files_data and files_data.get("files") and len(files_data.get("files", [])) > 0
+
+        total_files = files_data.get("total", 0) if files_data else 0
+        total_pages = max(1, (total_files + page_size - 1) // page_size)
+
+        if has_files:
+            files = files_data.get("files", [])
+
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("📕 Total PDFs", total_files)
+            with col2:
+                st.metric("📄 This Page", len(files))
+
+            st.divider()
+
+            for i, file in enumerate(files):
+                with st.container():
+                    col1, col2 = st.columns([4, 1])
+
+                    with col1:
+                        st.write(f"📕 **{file.get('file_name', 'Unknown')}**")
+                        st.caption(
+                            f"ID: {file.get('id', 'N/A')} | Created: {file.get('created_at', 'N/A')}"
+                        )
+
+                    with col2:
+                        if st.button("🗑️", key=f"delete_{file.get('id', i)}", help="Delete this file"):
+                            self.delete_pdf_file(file.get("id"), file.get("file_name"))
+
+                    st.divider()
+        else:
+            st.info("📕 No PDF files found. Upload some PDF files to get started!")
+
+        if total_pages > 1:
+            st.write(f"**Page {int(current_page)} of {total_pages}**")
+
+        action_cols = st.columns([1, 1])
+        with action_cols[0]:
+            if st.button("🔄 Refresh", use_container_width=True, key="refresh_btn"):
+                st.rerun()
+
+        with action_cols[1]:
+            st.caption("Upload form is always visible")
+
+    def delete_pdf_file(self, file_id, file_name):
+        """Delete PDF file"""
+        try:
+            response = requests.delete(
+                f"{self.BASE_URL}/storage/files/{file_id}",
+                timeout=30
+            )
+
+            if response.status_code == 200:
+                st.toast(f"✅ Deleted: {file_name}")
+                st.rerun()
+            else:
+                st.error(f"❌ Delete failed: {response.status_code} - {response.text}")
+
+        except Exception as e:
+            st.error(f"❌ Delete error: {str(e)}")
+
+    def download_pdf_file(self, file_id, file_name):
+        """Download PDF file đơn giản"""
+        try:
+            response = requests.get(
+                f"{self.BASE_URL}/storage/files/{file_id}/{file_name}",
+                stream=True,
+                timeout=60
+            )
+
+            if response.status_code == 200:
+                st.download_button(
+                    label=f"📥 Download {file_name}",
+                    data=response.content,
+                    file_name=file_name,
+                    mime="application/pdf"
+                )
+            else:
+                st.error(f"PDF download failed: {response.status_code}")
+        except Exception as e:
+            st.error(f"PDF download error: {str(e)}")
+
     def api_service(self, url, payload):
         res = requests.post(
             url,

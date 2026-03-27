@@ -1,44 +1,3 @@
-# # import json
-# # from typing import List, Optional
-# # from fastapi import APIRouter, Depends, File, Form, UploadFile
-# # from starlette import status
-# # from src.Shared.base import get_logger
-# # from src.Features.TicketAPI.TicketDTO import TicketCreateDTO, TicketSearchRequest, TicketUpdateDTO
-# # from src.Shared.base.APIResponse import APIResponse
-# # from src.Features.TicketAPI.TicketService import TicketService
-
-# # logger = get_logger(__name__)
-
-# # router = APIRouter(
-# #     prefix="/api/v1/tickets",
-# #     tags=["Ticket"]
-# # )
-
-# # @router.get("/")
-# # async def get_ticket(
-# #     req: TicketSearchRequest = Depends(),
-# #     service: TicketService = Depends()
-# # ):
-# #     result = await service.search(req)
-
-# #     return APIResponse(
-# #         message="Get tickets",
-# #         status_code=status.HTTP_200_OK,
-# #         data=result
-# #     )
-
-# # @router.post("/")
-# # async def create_ticket(
-# #     dto: TicketCreateDTO,
-# #     service: TicketService = Depends()
-# # ):
-# #     result = await service.create_ticket(dto)
-# #     return APIResponse(
-# #         message="Create ticket",
-# #         status_code=status.HTTP_201_CREATED,
-# #         data=result
-# #     )
-
 # # @router.post("/form")
 # # async def create_ticket_form(
 # #     ticket: str | None = Form(...),
@@ -66,7 +25,9 @@
 # #     ticket_data = json.loads(ticket)
 # #     dto = TicketUpdateDTO(**ticket_data)
 
-from fastapi import APIRouter, FastAPI, status
+import json
+from typing import List
+from fastapi import APIRouter, FastAPI, File, Form, UploadFile, status
 from fastapi.params import Depends
 from Features.TicketAPI.TicketDTO import TicketCreateDTO, TicketSearchRequest, TicketUpdateDTO
 from SharedKernel.base.APIResponse import APIResponse
@@ -86,6 +47,7 @@ class TicketController:
             tags=["Ticket"]
         )
         self.register_route()
+        self.statistic_route()
         self.app.include_router(self.router)
 
     def register_route(self):
@@ -105,15 +67,19 @@ class TicketController:
 
         @self.router.post("/", response_model=None)
         async def create_ticket(
-            dto: TicketCreateDTO, 
+            ticket: str | None = Form(...),
+            attachments: List[UploadFile] | None = File(None),
             ticket_service: TicketService = Depends()
         ):
-            result = await ticket_service.create_ticket(dto)
+            ticket_data = json.loads(ticket)
+            dto = TicketCreateDTO(**ticket_data)
+            print(dto)
+            response = await ticket_service.create_ticket_with_attachments(dto, attachments)
 
             return APIResponse(
                 message="Create ticket",
                 status_code=status.HTTP_201_CREATED,
-                data=result
+                data=response
             )
 
         @self.router.put("/{id}", response_model=None)
@@ -122,9 +88,45 @@ class TicketController:
             dto: TicketUpdateDTO,
             ticket_service: TicketService = Depends()
         ):
-            result = await ticket_service.edit_ticket(id, dto)
+            result = await ticket_service.update_ticket(id, dto)
             return APIResponse(
                 message="Edit ticket",
+                status_code=status.HTTP_200_OK,
+                data=result
+            )
+
+    def statistic_route(self):
+        @self.router.get("/dashboard/status")
+        async def get_status_statistics(
+            ticket_service: TicketService = Depends()
+        ):
+            result = await ticket_service.get_status_statistics()
+            return APIResponse(
+                message="Get status statistics",
+                status_code=status.HTTP_200_OK,
+                data=result
+            )
+
+        @self.router.get("/dashboard/priority")
+        async def get_priority_statistics(
+            ticket_service: TicketService = Depends()
+        ):
+            result = await ticket_service.get_priority_statistics()
+            return APIResponse(
+                message="Get priority statistics",
+                status_code=status.HTTP_200_OK,
+                data=result
+            )
+
+        @self.router.get("/dashboard/time")
+        async def get_time_statistics(
+            year: int = None,
+            month: int = None,
+            ticket_service: TicketService = Depends()
+        ):
+            result = await ticket_service.get_time_statistics(year, month)
+            return APIResponse(
+                message="Get time statistics",
                 status_code=status.HTTP_200_OK,
                 data=result
             )

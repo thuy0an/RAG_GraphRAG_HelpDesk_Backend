@@ -1,4 +1,5 @@
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_ollama import ChatOllama
 from Features.LangChainAPI.LangChainDTO import Callback, ChatRequest, ChatTechniqueRequest, ChatTemplateRequest, TechType, TemplateType
 from SharedKernel.persistence.Decorators import Service
 from SharedKernel.utils.yamlenv import load_env_yaml
@@ -17,18 +18,29 @@ class YouTubeVideo(BaseModel):
     is_short: bool = Field(description="Video có phải YouTube Shorts hay không")
 
 class PromptService:
-    def __init__(self, provider: BaseChatModel, callbacks: Callback):
-        self.provider = provider
-        self.callbacks = callbacks 
+    def __init__(self):
+        ...
 
-    async def aprompt(self, req: ChatRequest):
-        return await self.callbacks.ainvoke(self.provider, [System_Instruction(req)])
-        pass
+    async def hello(self):
+        provider = ChatOllama(
+            model="hf.co/unsloth/Qwen3-4B-Instruct-2507-GGUF:Q4_K_M",
+            base_url="http://localhost:11434"
+        )
 
-    async def asprompt(self, req: ChatRequest) -> dict:
-        return await self.callbacks.astream(self.provider, [System_Instruction(req)])
+        response = provider.astream("Xin chào, bạn khỏe không?")
 
+        async def gen():
+            yield f"[MODEL] {provider.model}\n"
+            async for chunk in response:
+                if chunk.content:
+                    yield chunk.content
+        return gen()
     async def GameAwardQA(self, question: str):
+        provider = ChatOllama(
+            model="hf.co/unsloth/Qwen3-4B-Instruct-2507-GGUF:Q4_K_M",
+            base_url="http://localhost:11434"
+        )
+
         GAME_AWARDS_2026 = {
             "Game of the Year": "Clair Obscur: Expedition 33",
             "Best RPG": "Clair Obscur: Expedition 33",
@@ -61,43 +73,63 @@ class PromptService:
         """)]
 
         messages.append(HumanMessage(content=question))
-        stream = self.provider.astream(messages)
 
-        async for chunk in stream:
-            yield chunk.content
+        async def gen():
+            async for chunk in provider.astream(messages):
+                if chunk.content:
+                    yield chunk.content
+        return gen()
         ...
 
-    async def create_blog_with_ai(self, title: str) -> dict:
+    async def create_blog_with_ai(self, title: str):
+        provider = ChatOllama(
+            model="hf.co/unsloth/Qwen3-4B-Instruct-2507-GGUF:Q4_K_M",
+            base_url="http://localhost:11434"
+        )
+
+
         template = "Viết một blog ngắn nói về {topic}" 
-        _prompt = PromptTemplate.from_template(template)
-        prompt = _prompt.format(topic=title)
+        prompt_template = PromptTemplate.from_template(template)
+        query = prompt_template.format(topic=title)
 
-        return await self.callbacks.astream(self.provider, prompt)
+        async def gen():
+            async for chunk in provider.astream(query):
+                if chunk.content:
+                    yield chunk.content
+        gen()
 
-    async def extract_youtube_video_info(
-        self, 
-        description: str):
-        instruction = """
+    async def extract_youtube_video_info(self, description: str):
+        provider = ChatOllama(
+            model="hf.co/unsloth/Qwen3-4B-Instruct-2507-GGUF:Q4_K_M",
+            base_url="http://localhost:11434"
+        )
+
+        parser = PydanticOutputParser(pydantic_object=YouTubeVideo)
+
+        template = PromptTemplate(
+        template="""
         Trích xuất thông tin video YouTube từ đoạn sau.
 
         {format_instructions}
 
         Description:
         {description}
-        """
+        """,
+                input_variables=["description"],
+                partial_variables={
+                    "format_instructions": parser.get_format_instructions()
+                },
+            )
 
-        parser = PydanticOutputParser(pydantic_object=YouTubeVideo)
+        prompt_text = template.format(description=description)
 
-        template = PromptTemplate(
-            template=instruction,
-            input_variables=["description"],
-            partial_variables={"format_instructions": parser.get_format_instructions()},
-        )
+        response = await provider.ainvoke([
+            HumanMessage(content=prompt_text)
+        ])
 
-        chain = template | self.provider | parser
-        stream = chain.astream({"description": description})
-        
-        async for chunk in stream:
-            yield chunk.model_dump_json()
+        result = parser.parse(response.content)
+        def gen():
+            yield result.model_dump_json()
+        return gen()
 
         

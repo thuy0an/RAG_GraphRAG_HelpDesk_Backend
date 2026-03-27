@@ -61,3 +61,66 @@ class TicketRepository(CrudRepository[Tickets, uuid.UUID]):
             page_size=req.page_size,
             total_elements=count_result[0]['total']
         )
+
+    async def get_status_statistics(self):
+        query = """
+        SELECT 
+            status,
+            COUNT(*) as count,
+            ROUND(COUNT(*) * 100.0 / (SELECT COUNT(*) FROM Tickets WHERE delete_at IS NULL), 2) as percentage
+        FROM Tickets 
+        WHERE delete_at IS NULL
+        GROUP BY status
+        ORDER BY count DESC
+        """
+        return await self.fetch_all(query)
+
+    async def get_priority_statistics(self):
+        query = """
+        SELECT 
+            priority,
+            COUNT(*) as count,
+            ROUND(COUNT(*) * 100.0 / (SELECT COUNT(*) FROM Tickets WHERE delete_at IS NULL), 2) as percentage
+        FROM Tickets 
+        WHERE delete_at IS NULL
+        GROUP BY priority
+        ORDER BY 
+            CASE priority
+                WHEN 'URGENT' THEN 1
+                WHEN 'HIGH' THEN 2
+                WHEN 'MEDIUM' THEN 3
+                WHEN 'LOW' THEN 4
+            END
+        """
+        return await self.fetch_all(query)
+
+    async def get_time_statistics(self, year: int = None, month: int = None):
+        base_filter = "WHERE delete_at IS NULL"
+        params = {}
+        
+        if year:
+            base_filter += " AND YEAR(created_at) = :year"
+            params['year'] = year
+        
+        if month:
+            base_filter += " AND MONTH(created_at) = :month"
+            params['month'] = month
+        
+        query = f"""
+        SELECT 
+            DATE_FORMAT(created_at, '%Y-%m') as month,
+            COUNT(*) as total_tickets,
+            SUM(CASE WHEN status = 'RESOLVED' THEN 1 ELSE 0 END) as resolved_tickets,
+            SUM(CASE WHEN status = 'CLOSED' THEN 1 ELSE 0 END) as closed_tickets,
+            SUM(CASE WHEN status IN ('RESOLVED', 'CLOSED') THEN 1 ELSE 0 END) as processed_tickets,
+            ROUND(
+                SUM(CASE WHEN status IN ('RESOLVED', 'CLOSED') THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 
+                2
+            ) as processed_percentage
+        FROM Tickets 
+        {base_filter}
+        GROUP BY DATE_FORMAT(created_at, '%Y-%m')
+        ORDER BY month DESC
+        """
+
+        return await self.fetch_all(query, params)

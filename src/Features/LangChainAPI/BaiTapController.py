@@ -1,14 +1,10 @@
-from typing import List
-
 from pydantic import BaseModel
 from Features.LangChainAPI.LangChainFacade import LangChainFacade
 from Features.LangChainAPI.LangTools import LangTools
-from SharedKernel.ai.AIConfig import AIConfigFactory
-from fastapi import APIRouter, Depends, FastAPI, File, Query, UploadFile
+from fastapi import APIRouter, Depends, FastAPI
 from fastapi.responses import StreamingResponse
-from lagom import Container
-from Features.LangChainAPI.LangChainDTO import ChatMessageRequest, ChatRequest, ChatTechniqueRequest, ChatTemplateRequest, PromptType, RagRequest, RagType, TechType, TemplateType
 from SharedKernel.persistence.Decorators import Controller
+from src.Features.LangChainAPI.LangChainDTO import ChatRequest
 
 @Controller
 class BaiTapController:
@@ -23,48 +19,26 @@ class BaiTapController:
             tags=["BTCNLTHD"]
         )
         self.tools = LangTools()
-        self.Chuong_1()
-        self.Chuong_2()
-        self.Chuong_3()
-        self.Chuong_4()
-        self.Chuong_5()
-        self.Chuong_6()
-        self.Chuong_7()
+
+        self.check_models()
+        self.game_awards_QA()
+        self.create_blog_with_ai()
+        self.format_youtube_video()
+        self.take_note()
+        self.search_multi_domain()
         self.app.include_router(self.router)
 
-    def Chuong_1(self):
-        """
-        Ung dung nhan tin voi AI
-        """
-
-        @self.router.post("/chat_with_ai")
-        async def chat_with_ai(
-            req: ChatRequest,
-            prompt_type: PromptType = PromptType.NONE,
+    def check_models(self):
+        @self.router.post("/chat")
+        async def check_models(
             langfacade: LangChainFacade = Depends()
         ):
-            async def handle_none(req):
-                return await langfacade.prompt.aprompt(req)
+            return StreamingResponse(
+                await langfacade.prompt_service.hello(),
+                media_type="text/event-stream"
+            )
 
-            async def handle_stream(req):
-                result = await langfacade.prompt.asprompt(req)
-                return StreamingResponse(
-                    result["content"],
-                    media_type="text/event-stream"
-                )
-
-            prompt_dict = {
-                PromptType.NONE: handle_none,
-                PromptType.STREAM: handle_stream
-            }
-
-            handler = prompt_dict.get(prompt_type)
-            if handler is None:
-                raise ValueError(f"Invalid prompt type: {prompt_type}")
-            return await handler(req)
-        ...
-
-    def Chuong_2(self):
+    def game_awards_QA(self):
         """
         Ung dung hoi dap game award
         """
@@ -73,12 +47,12 @@ class BaiTapController:
         @self.router.post("/game_awards_QA")
         async def game_awards_QA(req: ChatRequest, langfacade: LangChainFacade = Depends()):
             return StreamingResponse(
-                langfacade.prompt.GameAwardQA(req.question),
+                await langfacade.prompt_service.GameAwardQA(req.question),
                 media_type="text/event-stream"
             )
         ...
 
-    def Chuong_3(self):
+    def create_blog_with_ai(self):
         """
         Ung dung tao blog voi AI
         """
@@ -90,15 +64,15 @@ class BaiTapController:
             req: BlogRequest, 
             langfacade: LangChainFacade = Depends()
         ):
-            response = await langfacade.prompt.create_blog_with_ai(req.title)
+            response = await langfacade.prompt_service.create_blog_with_ai(req.title)
 
             return StreamingResponse(
-                response["content"],
+                response,
                 media_type="text/event-stream"
             )
         ...
 
-    def Chuong_4(self):
+    def format_youtube_video(self):
         """
         Ung dung format dinh dang thong tin video 
         """
@@ -111,33 +85,33 @@ class BaiTapController:
             langfacade: LangChainFacade = Depends() 
         ):
             return StreamingResponse(
-                langfacade.prompt.extract_youtube_video_info(req.description),
+                await langfacade.prompt_service.extract_youtube_video_info(req.description),
                 media_type="text/event-stream"
             )
         ...
 
-    def Chuong_5(self):
-        """
-        Ung dung viet tieu thuyet
-        Query: Cô bạn bàn bên
-        """
+    # def Chuong_5(self):
+    #     """
+    #     Ung dung viet tieu thuyet
+    #     Query: Cô bạn bàn bên
+    #     """
 
-        class NovelAgentRequest(BaseModel):
-            description: str
+    #     class NovelAgentRequest(BaseModel):
+    #         description: str
 
-        @self.router.post("/novel_agent")
-        async def novel_agent(
-            req: NovelAgentRequest,
-            langfacade: LangChainFacade = Depends()    
-        ):
-            response = langfacade.agent.write_narrative(req.description)
-            return StreamingResponse(
-                response,
-                media_type="text/event-stream"
-            )
-        ...
+    #     @self.router.post("/novel_agent")
+    #     async def novel_agent(
+    #         req: NovelAgentRequest,
+    #         langfacade: LangChainFacade = Depends()    
+    #     ):
+    #         response = langfacade.agent.write_narrative(req.description)
+    #         return StreamingResponse(
+    #             response,
+    #             media_type="text/event-stream"
+    #         )
+    #     ...
 
-    def Chuong_6(self):
+    def take_note(self):
         """
         Ung dung ghi chu 
 
@@ -153,14 +127,14 @@ class BaiTapController:
             req: TakeNoteRequest,
             langfacade: LangChainFacade = Depends()
         ):
-            response = await langfacade.agent.take_note(req.session_id, req.query)
+            response = await langfacade.agent_service.take_note(req.session_id, req.query)
             return StreamingResponse(
                 response,
                 media_type="text/event-stream"
             )
         ...
 
-    def Chuong_7(self):
+    def search_multi_domain(self):
         """
         Ung dung tim kiem da linh vuc
 
