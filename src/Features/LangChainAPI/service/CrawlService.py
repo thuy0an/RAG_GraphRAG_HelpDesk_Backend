@@ -1,10 +1,7 @@
-import csv
 import logging
 import os
-from typing import Any
 import requests
 from bs4 import BeautifulSoup
-from typing import Optional, Any
 import pandas as pd
 from io import StringIO
 

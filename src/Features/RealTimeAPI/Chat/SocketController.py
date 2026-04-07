@@ -20,16 +20,8 @@ class SocketController:
         self.app.include_router(self.ws_router)
         self.app.include_router(self.chat_router)
 
+    # ====================== WEBSOCKET ======================
     def register_websocket(self):
-    #     @self.ws_router.websocket("/{user_id}")
-    #     async def websocket_chat_new_conversation(
-    #         websocket: WebSocket,
-    #         user_id: str,
-    #         chat_service: ChatService = Depends()
-    #     ):
-    #         print(f"Starting new conversation for user: {user_id}")
-    #         await chat_service.websocket_chat(websocket, user_id, "None")
-
         @self.ws_router.websocket("/{user_id}/{conversation_key}")
         async def websocket_chat_with_conversation(
             websocket: WebSocket,
@@ -40,6 +32,7 @@ class SocketController:
             print(f"Joining conversation: {conversation_key}")
             await chat_service.websocket_chat(websocket, user_id, conversation_key)
 
+    # ====================== CHATROOM ======================
     def register_chatroom(self):
         @self.chat_router.get("/messages/{conversation_key}")
         async def get_messages(
@@ -70,7 +63,7 @@ class SocketController:
             user_id: str,
             service: ChatService = Depends()
         ):
-            result = await service.get_conversation_key_by_user_id(user_id) 
+            result = await service.get_conversation_key_by_agent(user_id) 
             return APIResponse(
                 message="Conversation retrieved successfully",
                 status_code=status.HTTP_200_OK,

@@ -1,9 +1,9 @@
-from typing import Any, List
+from typing import List
 from langchain_core.documents import Document
-from langchain_core.language_models import BaseChatModel
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from src.Features.LangChainAPI.LangChainDTO import Callback, ChunkResponse
+from src.Features.LangChainAPI.LangChainDTO import ChunkResponse
 from src.SharedKernel.utils.yamlenv import load_env_yaml
+from src.SharedKernel.base.Metrics import Metrics
 
 config = load_env_yaml()
 
@@ -14,6 +14,7 @@ law_separators=[
     "\n\n",
     "\n"
 ]
+
 class Process:
     def __init__(self) -> None:
         ...
@@ -40,93 +41,8 @@ class Process:
 
         return chunks
         ...
-    def split_by_page(self, docs: List[Document]):
-        for doc in docs:
-            page_chunks = self._split_docs(doc.page_content)
-            print(f" -> Created {len(page_chunks)} chunks")
 
-            for chunk in page_chunks:
-                ...
-        ...
-    
     def split_PaC(self, docs: List[Document]):
-        parent_chunks = []
-        child_chunks = []
-
-        full_text = ""
-        page_map = [] 
-
-        cursor = 0
-
-        for doc in docs:
-            text = doc.page_content
-            start = cursor
-            end = cursor + len(text)
-
-            page_map.append({
-                "start": start,
-                "end": end,
-                "page_number": doc.metadata["page_number"]
-            })
-
-            full_text += text
-            cursor = end
-
-        parent_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=2048,
-            chunk_overlap=410,
-            separators=law_separators,
-            is_separator_regex=True,
-            add_start_index=True
-        )
-        child_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=512,
-            chunk_overlap=102,
-            separators=law_separators,
-            is_separator_regex=True,
-            add_start_index=True
-        )
-        
-        parent_docs = parent_splitter.create_documents([full_text])
-        parent_chunks = []
-        child_chunks = []
-        for idx, parent in enumerate(parent_docs):
-            start_index = parent.metadata["start_index"]
-
-            page_number = 1
-
-            for p in page_map:
-                if p["start"] <= start_index < p["end"]:
-                    page_number = p["page_number"]
-                    break
-                
-            parent_id = f"parent_docs:{docs[0].metadata["source"]}:page_{page_number}:{idx}"
-
-            parent.metadata = {
-                "parent_id": parent_id,
-                "page_number": page_number,
-                "source": docs[0].metadata["source"]
-            }
-
-            parent_chunks.append(parent)
-
-            children = child_splitter.split_documents([parent])
-
-            for child in children:
-                child.metadata = {
-                    "parent_id": parent_id,
-                    "page_number": page_number,
-                    "source": parent.metadata.get("source", "")
-                }
-
-                child_chunks.append(child)
-
-        return {
-            "parent"   : parent_chunks,
-            "children" : child_chunks
-        }
-
-    def split_PaC_v2(self, docs: List[Document]):
         full_text = ""
         page_map = []
         cursor = 0
@@ -182,7 +98,7 @@ class Process:
 
             parent.metadata = {
                 "parent_id": parent_id,
-                "pages": pages_str,  
+                "pages": pages_str,
                 "page_span": f"{pages[0]}-{pages[-1]}",
                 "source": docs[0].metadata["source"]
             }

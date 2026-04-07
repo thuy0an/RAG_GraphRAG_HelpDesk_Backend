@@ -8,12 +8,11 @@ from typing import List
 import uuid6
 from fastapi import Depends, UploadFile, status
 from src.Features.LangChainAPI.LangChainFacade import LangChainFacade
-from src.Features.RealTimeAPI.Storage.FileDTO import FileSearchRequest, TypeStorage
 from src.Domain.base_entities import Attachment
 from SharedKernel.exception.APIException import APIException
 from SharedKernel.base.Logger import get_logger
-from src.Features.RealTimeAPI.Storage.StorageRepository import FileRepository
-from src.SharedKernel.persistence.Decorators import Transaction
+from src.Features.RealTimeAPI.FileSystem.StorageRepository import FileRepository
+from src.Features.RealTimeAPI.FileSystem.FileDTO import FileSearchRequest
 from src.SharedKernel.utils.yamlenv import load_env_yaml
 
 logger = get_logger(__name__)
@@ -23,7 +22,6 @@ class StorageService:
     def __init__(self, 
         repo: FileRepository = Depends(),
         langfacade: LangChainFacade = Depends()
-
     ):
         self.STORAGE_PREFIX  = "api/v1/storage/files" 
         self.repo = repo
@@ -69,9 +67,10 @@ class StorageService:
             with open(file_path, "wb") as f:
                 f.write(content)
 
-            # Reset con trỏ file về đầu để ingest
-            await file.seek(0)
-            await self.langfacade.synthesizer.ingest_pdf_PaC(file)
+            if file_ext.lower() == ".pdf":
+                # Reset con trỏ file về đầu để ingest
+                await file.seek(0)
+                await self.langfacade.synthesizer.ingest_pdf_PaC(file)
 
             attachment.id = new_id
             attachment.file_name = filename

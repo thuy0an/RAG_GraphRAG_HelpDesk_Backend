@@ -1,26 +1,17 @@
-"""
-RedisVSRepository - Repository layer for Redis Vector Store operations
-Handles all data access operations (CRUD) for vector store
-"""
-from collections import defaultdict
 import json
 import logging
 from typing import Any, Dict, List
-from langchain_community.storage.redis import RedisStore
-from redis import Redis
-from redisvl.index import SearchIndex
-from redisvl.query import FilterQuery, TextQuery, VectorQuery
 from langchain_core.documents import Document
-
-from SharedKernel.ai.AIConfig import AIConfigFactory
-from SharedKernel.ai.vector_store.VectorStoreConfig import VectoreStoreConfigFactory
+from redisvl.query import FilterQuery
+from SharedKernel.config.AIConfig import AIConfigFactory
+from SharedKernel.config.VectorStoreConfig import VectoreStoreConfigFactory
 from SharedKernel.utils.yamlenv import load_env_yaml
+from SharedKernel.persistence.RedisConnectionManager import get_redis_manager
 from src.Features.LangChainAPI.RAG.Retriever import HybridRetriever
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
 config = load_env_yaml()
-
 
 class RedisVSRepository:
     """
@@ -34,7 +25,15 @@ class RedisVSRepository:
         self.vs_config = VectoreStoreConfigFactory.create(config.vector_store.provider)
         self.redis_vs = self.vs_config.get_vecstore(self.embeddings)
         self.redis_url = self.vs_config.get_url()
-        self.store = RedisStore(redis_url=self.redis_url)
+        self._manager = get_redis_manager()
+        self._store = None
+
+    @property
+    def store(self):
+        """Lazy initialization of RedisStore"""
+        if self._store is None:
+            self._store = self._manager.get_store(self.redis_url)
+        return self._store
 
     # ============================================================
     # DOCUMENT OPERATIONS (CRUD)
@@ -43,7 +42,7 @@ class RedisVSRepository:
     async def abatch_add_documents(self, documents: List[Any]):
         """Add documents in batches to vector store"""
         if not documents:
-            print("No documents to add")
+            log.info("No documents to add")
             return []
 
         total_docs = len(documents)
@@ -55,22 +54,22 @@ class RedisVSRepository:
             batch_ids = await self.redis_vs.aadd_documents(batch)
             all_ids.extend(batch_ids)
 
-            print(f"Processed batch {i//batch_size + 1}/{(total_docs - 1)//batch_size + 1}")
+            log.info(f"Processed batch {i//batch_size + 1}/{(total_docs - 1)//batch_size + 1}")
 
-        print(f"Added {len(documents)} documents with metadata")
+        log.info(f"Added {len(documents)} documents with metadata")
         return all_ids
 
     async def add_documents_with_metadata(self, documents: List[Document]):
         """Add documents with metadata to vector store"""
         if documents:
-            print(f"Adding {len(documents)} documents with metadata...")
+            log.info(f"Adding {len(documents)} documents with metadata...")
             await self.redis_vs.aadd_documents(documents)
-            print(f"Successfully added {len(documents)} documents")
+            log.info(f"Successfully added {len(documents)} documents")
 
             sources = set(doc.metadata.get('source', 'unknown') for doc in documents)
-            print(f"Sources: {list(sources)}")
+            log.info(f"Sources: {list(sources)}")
         else:
-            print("No documents to add")
+            log.info("No documents to add")
 
     async def abatch_add_documents_with_metadata(self, chunks: List[Document]):
         """Batch add documents with enhanced metadata"""
@@ -94,27 +93,14 @@ class RedisVSRepository:
                 metadata=metadata
             ))
 
-        print(f"Saving {len(documents)} documents to vector store")
+        log.info(f"Saving {len(documents)} documents to vector store")
 
         if documents:
-            print(f"Sample metadata: {documents[0].metadata}")
+            log.info(f"Sample metadata: {documents[0].metadata}")
 
         await self.abatch_add_documents(documents)
 
     async def add_PaC_documents(self, chunks: Any):
-        """Add Parent-Child documents to vector store"""
-        parent_ids = []
-        for parent in chunks.get("parent", []):
-            key = parent.metadata.get('parent_id', "")
-            self.store.mset([(key, parent.page_content)])
-            parent_ids.append(key)
-            print(f"Saved parent: {key}")
-
-        print(chunks.get('children'))
-        await self.abatch_add_documents_with_metadata(chunks.get('children', []))
-        print(f"Saved child")
-
-    async def add_PaC_documents_v2(self, chunks: Any):
         """Add Parent-Child documents to vector store with parent metadata"""
         parent_ids = []
         for parent in chunks.get("parent", []):
@@ -125,18 +111,15 @@ class RedisVSRepository:
             }
             self.store.mset([(key, json.dumps(parent_data))])
             parent_ids.append(key)
-            print(f"Saved parent with metadata: {key}")
 
-        print(chunks.get('children'))
-        await self.abatch_add_documents_with_metadata(chunks.get('children', []))
-        print(f"Saved child")
-
+        children = chunks.get('children', [])
+        await self.abatch_add_documents_with_metadata(children)
+    
     async def delete_documents_by_metadata(self, metadata: dict):
         """Delete documents from vector store by metadata"""
         try:
-            r = Redis.from_url(self.redis_url)
-            index = SearchIndex.from_yaml("config/redis_index.yaml")
-            index.connect(redis_url=self.redis_url)
+            r = self._manager.get_redis(self.redis_url)
+            index = self._manager.get_search_index(self.redis_url)
 
             target_source = metadata["source"]
             filter_expression = f'@source:{{"{target_source}"}}'
@@ -175,9 +158,9 @@ class RedisVSRepository:
 
                 pipeline.execute()
                 offset += BATCH_SIZE
-                print(f"Deleted batch, total: {deleted_count}")
+                log.info(f"Deleted batch, total: {deleted_count}")
 
-            print(f"Deleted {deleted_count} vector documents for source: {target_source}")
+            log.info(f"Deleted {deleted_count} vector documents for source: {target_source}")
 
             # Delete parent docs
             cursor = 0
@@ -209,7 +192,7 @@ class RedisVSRepository:
                 if cursor == 0:
                     break
 
-            print(f"Deleted {deleted_count} vector docs and {deleted_parents} parent docs for source: {target_source}")
+            log.info(f"Deleted {deleted_count} vector docs and {deleted_parents} parent docs for source: {target_source}")
         except Exception as e:
             log.error(f"Error deleting documents: {e}")
             return
@@ -218,9 +201,9 @@ class RedisVSRepository:
     # SEARCH/RETRIEVE OPERATIONS
     # ============================================================
     async def hybrid_retriver(self, query: str, k: int = 5) -> List[Dict]:
-        hre = HybridRetriever(self.embeddings, self.redis_url)
+        hre = HybridRetriever(
+            self.embeddings, 
+            self.redis_url,
+            connection_manager=self._manager
+        )
         return await hre.retriever(query, k)
-
-    async def hybrid_retriver_v2(self, query: str, k: int = 5) -> List[Dict]:
-        hre = HybridRetriever(self.embeddings, self.redis_url)
-        return await hre.retriever_v2(query, k)

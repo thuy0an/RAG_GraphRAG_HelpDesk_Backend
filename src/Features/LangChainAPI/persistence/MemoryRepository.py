@@ -22,7 +22,7 @@ class MemoryRepository:
     Handles all database operations for chat memory.
     """
 
-    def __init__(self, db_path: str = ".data/chat_history.db"):
+    def __init__(self, db_path: str = "specs/data/chat_history.db"):
         self.db_path = Path(db_path).resolve()
         self._ensure_dir()
         self._sqlite_engine: AsyncEngine = None
@@ -58,21 +58,6 @@ class MemoryRepository:
     def _ensure_dir(self):
         """Ensure data directory exists"""
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # async def init_db(self) -> None:
-    #     """Initialize database - create table if not exists"""
-    #     async with self.sqlite_engine.begin() as conn:
-    #         result = await conn.execute(sa_text("""
-    #             SELECT 1 FROM sqlite_master 
-    #             WHERE type='table' AND name='conversation_history'
-    #         """))
-    #         exists = result.scalar() is not None
-
-    #         if not exists:
-    #             await conn.run_sync(
-    #                 SQLModel.metadata.create_all,
-    #                 tables=[ConversationHistory.__table__]
-    #             )
 
     async def add_message(self, session_id: str, role: str, content: str) -> None:
         """Insert a single message to database"""
@@ -128,7 +113,7 @@ class MemoryRepository:
         async with self.sqlite_engine.connect() as conn:
             data_result = await conn.execute(sa_text(data_query), params)
             data = [dict(row) for row in data_result.mappings().all()]
-            data = data[::-1]  # Reverse to chronological order
+            data = data[::-1]  
 
             count_result = await conn.execute(sa_text(count_query), count_params)
             total_elements = count_result.scalar()

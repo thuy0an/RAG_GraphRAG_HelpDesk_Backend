@@ -1,15 +1,10 @@
-import base64
 import json
-import os
-from typing import List, Optional
-
-import uuid6
-from src.Domain.base_entities import Attachment, Messages
+from typing import Optional
+from src.Domain.base_entities import Messages
 from src.Features.RealTimeAPI.Chat.ChatDTO import MessageRequest
 from src.Features.RealTimeAPI.Chat.ChatRepository import ChatRepository
 from fastapi import Depends, WebSocket, WebSocketDisconnect, status
-from src.Features.RealTimeAPI.Storage.StorageService import StorageService
-from src.Features.RealTimeAPI.Storage.FileDTO import TypeStorage
+from src.Features.RealTimeAPI.FileSystem.StorageService import StorageService
 from src.SharedKernel.exception.APIException import APIException
 from src.SharedKernel.socket.SocketManager import SocketManager
 from src.SharedKernel.utils.Utils import Utils
@@ -63,7 +58,7 @@ class ChatService:
             if customer_care_agent is None:
                 return APIException(
                     message="Ko tìm thấy nhân viên cskh",
-                    status=status.HTTP_404_NOT_FOUND
+                    status_code=status.HTTP_404_NOT_FOUND
                 )
 
             customer_care_agent_id = customer_care_agent['id']
@@ -116,6 +111,9 @@ class ChatService:
             json_res = json.dumps(response)
         ...
 
+    #
+    # CHAT
+    #
     async def send_message(self, req: MessageRequest):
         message = Messages(
             sender_id=req.user_id, 
@@ -171,12 +169,14 @@ class ChatService:
 
         return await self.repo.fetch_all(
             """
-            SELECT DISTINCT conversation_key
-            FROM Messages
-            WHERE conversation_key LIKE :agent_id
-            ORDER BY conversation_key;
+            SELECT DISTINCT m.conversation_key, c.username
+            FROM Messages m
+            JOIN Accounts c ON c.id = m.sender_id
+            WHERE m.conversation_key LIKE :agent_id_wildcard
+            AND m.sender_id <> :agent_id
+            ORDER BY m.conversation_key;
             """,
-            {"agent_id": f"%{agent_id}%"}
+            {"agent_id_wildcard": f"%{agent_id}%", "agent_id": f"{agent_id}"}
         )
 
         

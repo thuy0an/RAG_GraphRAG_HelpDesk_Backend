@@ -1,7 +1,7 @@
 import uuid
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from src.Features.RealTimeAPI.Storage.FileDTO import FileSearchRequest
+from src.Features.RealTimeAPI.FileSystem.FileDTO import FileSearchRequest
 from src.Domain.base_entities import Attachment
 from src.SharedKernel.base.Page import Page
 from src.SharedKernel.persistence.CrudRepository import CrudRepository
@@ -11,7 +11,6 @@ from src.SharedKernel.persistence.QueryExtension import QueryExtension
 from src.SharedKernel.utils.yamlenv import load_env_yaml
 from sqlalchemy.ext.asyncio import AsyncSession
 
-@Repository
 class FileRepository(CrudRepository[Attachment, uuid.UUID]):
     def __init__(self, session: AsyncSession = Depends(get_db_session)):
         super().__init__(Attachment, session)

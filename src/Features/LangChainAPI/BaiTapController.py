@@ -45,7 +45,10 @@ class BaiTapController:
         class ChatRequest(BaseModel):
             question: str="Game of the Year 2026 là gì?"
         @self.router.post("/game_awards_QA")
-        async def game_awards_QA(req: ChatRequest, langfacade: LangChainFacade = Depends()):
+        async def game_awards_QA(
+            req: ChatRequest, 
+            langfacade: LangChainFacade = Depends()
+        ):
             return StreamingResponse(
                 await langfacade.prompt_service.GameAwardQA(req.question),
                 media_type="text/event-stream"
@@ -89,27 +92,6 @@ class BaiTapController:
                 media_type="text/event-stream"
             )
         ...
-
-    # def Chuong_5(self):
-    #     """
-    #     Ung dung viet tieu thuyet
-    #     Query: Cô bạn bàn bên
-    #     """
-
-    #     class NovelAgentRequest(BaseModel):
-    #         description: str
-
-    #     @self.router.post("/novel_agent")
-    #     async def novel_agent(
-    #         req: NovelAgentRequest,
-    #         langfacade: LangChainFacade = Depends()    
-    #     ):
-    #         response = langfacade.agent.write_narrative(req.description)
-    #         return StreamingResponse(
-    #             response,
-    #             media_type="text/event-stream"
-    #         )
-    #     ...
 
     def take_note(self):
         """

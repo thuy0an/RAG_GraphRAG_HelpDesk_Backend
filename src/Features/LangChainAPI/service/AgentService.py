@@ -10,7 +10,7 @@ from sqlalchemy import create_engine
 class AgentService:
 
     def __init__(self):
-        self.url = self._create_file(".data", "test_chat.db")
+        self.url = self._create_file("specs/data", "note.db")
         self.engine = create_engine(f"sqlite:///{self.url}")
         ...
 
@@ -57,6 +57,7 @@ class AgentService:
                     yield msg.content
         ...
 
+    # 
     async def take_note(self, session_id: str, query: str):
         provider = ChatOllama(
             model="hf.co/unsloth/Qwen3-4B-Instruct-2507-GGUF:Q4_K_M",
@@ -118,6 +119,7 @@ class AgentService:
             session_id=session_id,
             connection=self.engine
         ) 
+
     def _create_file(self, path: str, name: str):
         full_path = Path(path).resolve() / name
         full_path.parent.mkdir(parents=True, exist_ok=True)
@@ -129,6 +131,7 @@ class AgentService:
                 raise ValueError(f"Cannot create file: {e}")
         return str(full_path)
 
+    # 
     async def search_multi_domain(self, query: str):
         provider = ChatOllama(
             model="hf.co/unsloth/Qwen3-4B-Instruct-2507-GGUF:Q4_K_M",

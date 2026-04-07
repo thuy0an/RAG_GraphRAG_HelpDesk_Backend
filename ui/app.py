@@ -343,13 +343,10 @@ class App:
         
         st.divider()
         
-        # Lấy query từ lần render trước (nếu có)
         pending_query = st.session_state.get("rag_pending_query", None)
         
-        # Hiển thị chat history với pending query
         self.chat_history_component(session_id, pending_query=pending_query)
         
-        # Xóa pending query sau khi đã xử lý
         if pending_query:
             del st.session_state.rag_pending_query
         
@@ -359,7 +356,6 @@ class App:
             key="rag_chat_input"
         )
         
-        # Lưu query vào session_state và rerun để xử lý
         if query:
             st.session_state.rag_pending_query = query
             st.rerun()
@@ -379,19 +375,26 @@ class App:
     def pdf_upload_component(self):
         st.subheader("📤 Upload PDF Documents")
 
+        # Use dynamic key to reset file uploader after upload
+        if "uploader_key" not in st.session_state:
+            st.session_state.uploader_key = 0
+
         with st.form("upload_form"):
             files = st.file_uploader(
                 "Chọn PDF files để upload",
                 type=["pdf"],
                 accept_multiple_files=True,
-                key="pdf_uploader"
+                key=f"pdf_uploader_{st.session_state.uploader_key}"
             )
             submitted = st.form_submit_button("📤 Upload PDF Files")
 
-        if submitted and files:
+        if submitted:
+            if not files:
+                st.warning("⚠️ Vui lòng chọn file PDF trước khi upload")
+                return
             with st.spinner("Đang upload PDF..."):
                 self.upload_pdf_files(files)
-
+                st.session_state.uploader_key += 1
 
     def upload_pdf_files(self, files):
         """Upload PDF files với progress tracking"""
@@ -418,7 +421,7 @@ class App:
                 response = requests.post(
                     f"{self.BASE_URL}/storage/files/upload",
                     files=files_data,
-                    timeout=120
+                    timeout=600
                 )
 
                 if response.status_code == 200:
@@ -456,6 +459,7 @@ class App:
         if uploaded:
             st.cache_data.clear()
             st.toast(f"✅ Upload {len(uploaded)} file thành công")
+            st.rerun()
 
 
     def format_file_size(self, size_bytes):
@@ -540,18 +544,18 @@ class App:
                     col1, col2 = st.columns([4, 1])
 
                     with col1:
-                        st.write(f"📕 **{file.get('file_name', 'Unknown')}**")
+                        st.write(f"**{file.get('file_name', 'Unknown')}**")
                         st.caption(
                             f"ID: {file.get('id', 'N/A')} | Created: {file.get('created_at', 'N/A')}"
                         )
 
                     with col2:
-                        if st.button("🗑️", key=f"delete_{file.get('id', i)}", help="Delete this file"):
+                        if st.button("Delete", key=f"delete_{file.get('id', i)}", help="Delete this file"):
                             self.delete_pdf_file(file.get("id"), file.get("file_name"))
 
                     st.divider()
         else:
-            st.info("📕 No PDF files found. Upload some PDF files to get started!")
+            st.info("No PDF files found. Upload some PDF files to get started!")
 
         if total_pages > 1:
             st.write(f"**Page {int(current_page)} of {total_pages}**")
@@ -574,6 +578,7 @@ class App:
 
             if response.status_code == 200:
                 st.toast(f"✅ Deleted: {file_name}")
+                st.cache_data.clear()
                 st.rerun()
             else:
                 st.error(f"❌ Delete failed: {response.status_code} - {response.text}")

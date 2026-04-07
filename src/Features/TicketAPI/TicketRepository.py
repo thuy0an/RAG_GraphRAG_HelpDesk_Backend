@@ -43,6 +43,11 @@ class TicketRepository(CrudRepository[Tickets, uuid.UUID]):
             )
             .filter(
                 req.priority, "t.priority = :priority", priority=req.priority)
+            .filter(
+                req.customer_id,
+                "t.customer_id = :customer_id",
+                customer_id=req.customer_id
+            )
             .paginate(
                 req.page, 
                 req.page_size

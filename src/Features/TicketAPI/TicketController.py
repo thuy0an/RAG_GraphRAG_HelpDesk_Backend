@@ -1,42 +1,11 @@
-# # @router.post("/form")
-# # async def create_ticket_form(
-# #     ticket: str | None = Form(...),
-# #     attachments: List[UploadFile] | None = File(None),
-# #     service: TicketService = Depends()
-# # ):
-# #     result = None
-# #     if ticket:
-# #         ticket_data = json.loads(ticket)
-# #         dto = TicketCreateDTO(**ticket_data)
-# #         result = await service.create_ticket_with_attachments(dto, attachments)
-# #     return APIResponse(
-# #         message="Create ticket",
-# #         status_code=status.HTTP_201_CREATED,
-# #         data=result
-# #     )
-
-# # @router.put("/form/{id}")
-# # async def edit_ticket_form(
-# #     id: str,
-# #     ticket: str | None = Form(None),
-# #     attachments: List[UploadFile] | None = File(None),
-# #     service: TicketService = Depends()
-# # ):
-# #     ticket_data = json.loads(ticket)
-# #     dto = TicketUpdateDTO(**ticket_data)
-
 import json
 from typing import List
 from fastapi import APIRouter, FastAPI, File, Form, UploadFile, status
 from fastapi.params import Depends
-from Features.TicketAPI.TicketDTO import TicketCreateDTO, TicketSearchRequest, TicketUpdateDTO
+from Features.TicketAPI.TicketDTO import TicketBaseDTO, TicketFeedbackDTO, TicketSearchRequest
 from SharedKernel.base.APIResponse import APIResponse
 from SharedKernel.persistence.Decorators import Controller
-from SharedKernel.persistence.PersistenceManager import PersistenceManagerFactory
-from SharedKernel.utils.yamlenv import load_env_yaml
 from src.Features.TicketAPI.TicketService import TicketService
-
-config = load_env_yaml()
 
 @Controller
 class TicketController:
@@ -72,7 +41,7 @@ class TicketController:
             ticket_service: TicketService = Depends()
         ):
             ticket_data = json.loads(ticket)
-            dto = TicketCreateDTO(**ticket_data)
+            dto = TicketBaseDTO(**ticket_data)
             print(dto)
             response = await ticket_service.create_ticket_with_attachments(dto, attachments)
 
@@ -85,12 +54,39 @@ class TicketController:
         @self.router.put("/{id}", response_model=None)
         async def edit_ticket(
             id: str,
-            dto: TicketUpdateDTO,
+            dto: TicketBaseDTO,
             ticket_service: TicketService = Depends()
         ):
             result = await ticket_service.update_ticket(id, dto)
             return APIResponse(
                 message="Edit ticket",
+                status_code=status.HTTP_200_OK,
+                data=result
+            )
+        
+        @self.router.get("/user/{user_id}")
+        async def get_ticket_by_user_id(
+            user_id: str,
+            query_dto: TicketSearchRequest = Depends(), 
+            ticket_service: TicketService = Depends()
+        ):
+            result = await ticket_service.search(query_dto)
+
+            return APIResponse(
+                message=f"Get tickets for user {user_id}",
+                status_code=status.HTTP_200_OK,
+                data=result
+            )
+
+        @self.router.post("/{id}/feedback")
+        async def submit_feedback(
+            id: str,
+            dto: TicketFeedbackDTO,
+            ticket_service: TicketService = Depends()
+        ):
+            result = await ticket_service.submit_feedback(id, dto)
+            return APIResponse(
+                message="Feedback submitted",
                 status_code=status.HTTP_200_OK,
                 data=result
             )
