@@ -3,8 +3,8 @@ from typing import List
 from fastapi import APIRouter, Depends, FastAPI, File, Query, Request, UploadFile, status 
 from fastapi.responses import FileResponse
 from SharedKernel.persistence.Decorators import Controller
-from src.Features.RealTimeAPI.Storage.StorageService import StorageService
-from src.Features.RealTimeAPI.Storage.FileDTO import FileSearchRequest, TypeStorage
+from src.Features.RealTimeAPI.FileSystem.StorageService import StorageService
+from src.Features.RealTimeAPI.FileSystem.FileDTO import FileSearchRequest
 from src.SharedKernel.base.APIResponse import APIResponse
 
 @Controller
@@ -22,7 +22,10 @@ class StorageController:
     def register_route(self):
 
         @self.router.get("/files")
-        async def get_all_files(req: FileSearchRequest = Depends(), storage_service: StorageService = Depends()):
+        async def get_all_files(
+            req: FileSearchRequest = Depends(), 
+            storage_service: StorageService = Depends()
+        ):
             result = await storage_service.get_all_files(req)
             
             return APIResponse(

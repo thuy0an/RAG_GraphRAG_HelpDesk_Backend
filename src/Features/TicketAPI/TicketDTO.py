@@ -28,7 +28,12 @@ class TicketBaseDTO(BaseModel):
     # Timestamps
     created_at: Optional[datetime] = Field(default=None, example="2024-01-01T00:00:00")
     delete_at: Optional[datetime] = Field(default=None, example=None)
-    
+
+class TicketFeedbackDTO(BaseModel):
+    satisfaction_rating: int = Field(..., ge=1, le=5, example=5, description="Đánh giá từ 1-5")
+    customer_feedback: Optional[str] = Field(default=None, example="Rất hài lòng với dịch vụ")
+
+
 class TicketSearchRequest(BaseModel):
     page: int = Field(1, ge=1, description="Page number")
     page_size: int = Field(5, ge=1, le=100, description="Page size")
@@ -36,4 +41,5 @@ class TicketSearchRequest(BaseModel):
     department_name: Optional[str] = Field(None, description="Filter by department")
     status: Optional[str] = Field(None, description="Filter by status")
     priority: Optional[str] = Field(None, description="Filter by priority")
+    customer_id: Optional[str] = Field(None, description="Filter by customer ID")
 

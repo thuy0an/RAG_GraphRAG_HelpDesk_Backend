@@ -80,9 +80,7 @@ dmypy.json
 .github/
 .windsurf/
 .vscode/
-specs
+specs/
 static/
 packages.sh
-config.yaml
-script.sh
-.data
+config/

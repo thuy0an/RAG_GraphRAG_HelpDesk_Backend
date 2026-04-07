@@ -41,7 +41,7 @@ class AuthController:
                 data=result
             )
 
-        @self.router.post("/sign-in")
+        @self.router.post("/sign-in", description="Login account")
         async def login_account(
             dto: LoginAccountRequest,
             service: AuthService = Depends()
@@ -55,7 +55,7 @@ class AuthController:
                 }
             )
 
-        @self.router.put("/{id}")
+        @self.router.put("/{id}", description="Update account")
         async def edit_account(
             id: str,
             dto: UpdateAccountRequest,
@@ -68,7 +68,7 @@ class AuthController:
                 data=result
             )
 
-        @self.router.delete("/account/{id}")
+        @self.router.delete("/account/{id}", description="Soft delete account")
         async def soft_delete_account(
             id: str,
             service: AuthService = Depends()

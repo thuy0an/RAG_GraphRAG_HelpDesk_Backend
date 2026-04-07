@@ -16,7 +16,7 @@ class LangTools:
             with DDGS() as ddgs:
                 results = ddgs.text(query, max_results=max_result, region="vn-vi")
                 if not results:
-                    return "Ko tim thay ket qua"
+                    return "Không tìm thấy kết quả"
                 for result in results:
                     urls.append(result["href"])
             print(f"response: {urls}")
@@ -28,7 +28,7 @@ class LangTools:
         text = await self.crawl_web(url)
 
         if not text:
-            yield "No content found"
+            yield "Ko tìm thấy kết quả"
             return
 
         step = 100

@@ -8,8 +8,8 @@ import uuid6
 from SharedKernel.base.Logger import get_logger
 from src.Domain.base_entities import Tickets
 from src.Features.TicketAPI.TicketRepository import TicketRepository
-from src.Features.TicketAPI.TicketDTO import TicketBaseDTO, TicketSearchRequest
-from src.Features.RealTimeAPI.Storage.StorageService import StorageService
+from src.Features.TicketAPI.TicketDTO import TicketBaseDTO, TicketFeedbackDTO, TicketSearchRequest
+from src.Features.RealTimeAPI.FileSystem.StorageService import StorageService
 
 logger = get_logger(__name__)
 new_id = uuid6.uuid7()
@@ -45,8 +45,51 @@ class TicketService:
 
         ticket = self.ticket_repo.update_model_from_dto(model, dto)
         return await self.ticket_repo.save(ticket)
-    
-    # 
+
+    async def soft_delete_ticket(self, id: str):
+        model = await self.ticket_repo.find_by_id(uuid.UUID(id))
+        model.delete_at = datetime.datetime.now()
+        if not model:
+            raise ValueError(f"Ticket with ID {id} not found")
+        return await self.ticket_repo.save(model)
+
+    async def update_ticket(self, ticket_id: str, dto: TicketBaseDTO) -> Tickets:
+        ticket = await self.ticket_repo.find_by_id(ticket_id)
+        
+        for field, value in dto.model_dump(exclude_unset=True).items():
+            if hasattr(ticket, field):
+                setattr(ticket, field, value)
+        
+        return await self.ticket_repo.update(ticket)
+
+    async def submit_feedback(self, ticket_id: str, dto: TicketFeedbackDTO) -> Tickets:
+        ticket = await self.ticket_repo.find_by_id(ticket_id)
+        
+        if not ticket:
+            raise ValueError(f"Ticket with ID {ticket_id} not found")
+        
+        if ticket.status != "RESOLVED":
+            raise ValueError("Only resolved tickets can receive feedback")
+        
+        ticket.satisfaction_rating = dto.satisfaction_rating
+        ticket.customer_feedback = dto.customer_feedback
+        
+        return await self.ticket_repo.update(ticket)
+
+    # Static 
+    async def get_status_statistics(self):
+        """Thống kê số lượng ticket theo status"""
+        return await self.ticket_repo.get_status_statistics()
+
+    async def get_priority_statistics(self):
+        """Thống kê số lượng ticket theo priority"""
+        return await self.ticket_repo.get_priority_statistics()
+
+    async def get_time_statistics(self, year: int = None, month: int = None):
+        """Thống kê ticket theo thời gian (tháng/năm)"""
+        return await self.ticket_repo.get_time_statistics(year, month)
+
+    # DEPRECATE 
     # async def edit_ticket_with_attachments(self, id: str, dto: TicketUpdateDTO, files: List[UploadFile]) -> Tickets:
     #     logger.info(f"DTO: {dto}")
     #     model = await self.ticket_repo.find_by_id(uuid.UUID(id))
@@ -76,39 +119,10 @@ class TicketService:
     #     logger.info(f"Edit ticket: {ticket}")
     #     return await self.ticket_repo.save(ticket)
 
-    async def soft_delete_ticket(self, id: str):
-        model = await self.ticket_repo.find_by_id(uuid.UUID(id))
-        model.delete_at = datetime.datetime.now()
-        if not model:
-            raise ValueError(f"Ticket with ID {id} not found")
-        return await self.ticket_repo.save(model)
-    
-
+    # TEST AGENTIC RAW QUERY 
     # async def create_raw(self):
     #     query = """
     #         INSERT INTO Ticket (subject) VALUES ('abc');
     #     """
 
     #     return await self.ticket_repo.execute_raw(query)
-
-    async def update_ticket(self, ticket_id: str, dto: TicketBaseDTO) -> Tickets:
-        ticket = await self.ticket_repo.find_by_id(ticket_id)
-        
-        for field, value in dto.model_dump(exclude_unset=True).items():
-            if hasattr(ticket, field):
-                setattr(ticket, field, value)
-        
-        return await self.ticket_repo.update(ticket)
-
-    # Static 
-    async def get_status_statistics(self):
-        """Thống kê số lượng ticket theo status"""
-        return await self.ticket_repo.get_status_statistics()
-
-    async def get_priority_statistics(self):
-        """Thống kê số lượng ticket theo priority"""
-        return await self.ticket_repo.get_priority_statistics()
-
-    async def get_time_statistics(self, year: int = None, month: int = None):
-        """Thống kê ticket theo thời gian (tháng/năm)"""
-        return await self.ticket_repo.get_time_statistics(year, month)

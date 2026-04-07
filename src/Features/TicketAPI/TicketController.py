@@ -2,13 +2,10 @@ import json
 from typing import List
 from fastapi import APIRouter, FastAPI, File, Form, UploadFile, status
 from fastapi.params import Depends
-from Features.TicketAPI.TicketDTO import TicketBaseDTO, TicketSearchRequest
+from Features.TicketAPI.TicketDTO import TicketBaseDTO, TicketFeedbackDTO, TicketSearchRequest
 from SharedKernel.base.APIResponse import APIResponse
 from SharedKernel.persistence.Decorators import Controller
-from SharedKernel.utils.yamlenv import load_env_yaml
 from src.Features.TicketAPI.TicketService import TicketService
-
-config = load_env_yaml()
 
 @Controller
 class TicketController:
@@ -63,6 +60,33 @@ class TicketController:
             result = await ticket_service.update_ticket(id, dto)
             return APIResponse(
                 message="Edit ticket",
+                status_code=status.HTTP_200_OK,
+                data=result
+            )
+        
+        @self.router.get("/user/{user_id}")
+        async def get_ticket_by_user_id(
+            user_id: str,
+            query_dto: TicketSearchRequest = Depends(), 
+            ticket_service: TicketService = Depends()
+        ):
+            result = await ticket_service.search(query_dto)
+
+            return APIResponse(
+                message=f"Get tickets for user {user_id}",
+                status_code=status.HTTP_200_OK,
+                data=result
+            )
+
+        @self.router.post("/{id}/feedback")
+        async def submit_feedback(
+            id: str,
+            dto: TicketFeedbackDTO,
+            ticket_service: TicketService = Depends()
+        ):
+            result = await ticket_service.submit_feedback(id, dto)
+            return APIResponse(
+                message="Feedback submitted",
                 status_code=status.HTTP_200_OK,
                 data=result
             )

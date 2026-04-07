@@ -9,7 +9,7 @@ fields:
   - name: embedding
     type: vector
     attrs:
-      dims: 2560
+      dims: 768
       algorithm: hnsw
       distance_metric: cosine
       datatype: float32
@@ -49,4 +49,3 @@ fields:
 
   - name: parent_id
     type: tag
-

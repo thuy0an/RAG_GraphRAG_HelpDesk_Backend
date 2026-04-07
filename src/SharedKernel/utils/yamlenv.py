@@ -1,4 +1,3 @@
-from redisvl.schema import IndexSchema
 import yaml
 
 class Config:
