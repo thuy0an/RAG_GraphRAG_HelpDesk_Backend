@@ -33,7 +33,7 @@ class Synthesizer:
         self._lexical_builder = None
         self.memory_repo = MemoryRepository()
 
-        self.ai_config = ai_factory.create(config.ai.llm_provider)
+        self.ai_config = ai_factory.create(config.llm.provider)
         self.embedding_model = self.ai_config.create_embedding()
 
     @property
@@ -81,13 +81,13 @@ class Synthesizer:
                 self.process.split_PaC, docs
             )
 
-        with metrics.stage("add_documents"):
-            await self.thread_pool.run_in_executor(
-                lambda chunks: asyncio.run(
-                    self.redis_vs_repo.add_PaC_documents(chunks)
-                ),
-                chunks,
-            )
+        # with metrics.stage("add_documents"):
+        #     await self.thread_pool.run_in_executor(
+        #         lambda chunks: asyncio.run(
+        #             self.redis_vs_repo.add_PaC_documents(chunks)
+        #         ),
+        #         chunks,
+        #     )
 
         metrics.log_summary()
 
@@ -305,8 +305,9 @@ class Synthesizer:
             Hãy trả lời câu hỏi của người dùng dựa trên context
 
             YÊU CẦU BẮT BUỘC:
-            1. Trả lời câu hỏi dựa trên ngữ cảnh
-            2. KẾT THÚC câu trả lời với 3 dòng thông tin nguồn:
+            1. Tuân theo quy tắc xử lý
+            2. Trả lời câu hỏi dựa trên ngữ cảnh
+            3. KẾT THÚC câu trả lời với 3 dòng thông tin nguồn:
 
             Trong ngữ cảnh có metadata ở cuối mỗi tài liệu với định dạng:
             Source: <tên file>, Page: <trang>

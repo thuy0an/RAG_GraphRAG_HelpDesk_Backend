@@ -19,11 +19,12 @@ class LangChainController:
         self.tool_router = APIRouter(prefix="/api/v1/tools", tags=["Tools"])
         self.tools = LangTools()
         self.register_route()
-        self.tool_route()
         self.app.include_router(self.router)
-        self.app.include_router(self.tool_router)
 
     def register_route(self):
+        #
+        # RAG
+        #
         @self.router.get("/chat_history/{session_id}")
         async def get_chat_history(
             session_id: str, langfacade: LangChainFacade = Depends()
@@ -44,7 +45,7 @@ class LangChainController:
             files: List[UploadFile] = File(...), langfacade: LangChainFacade = Depends()
         ):
             for file in files:
-                await langfacade.synthesizer.ingest_pdf_PaC(file)
+                await langfacade.synthesizer.ingest_file_PaC(file)
 
             return APIResponse(
                 message=f"Successfully processed {len(files)} PDF file(s)",
@@ -76,37 +77,14 @@ class LangChainController:
             req: RetrieveDocumentRequest, langfacade: LangChainFacade = Depends()
         ):
             return StreamingResponse(
-                await langfacade.synthesizer.rag_PaC(req.query, req.session_id),
+                await langfacade.synthesizer.retriver_documents_PaC(req.query, req.session_id),
                 media_type="text/event-stream",
             )
             ...
 
-        @self.tool_router.post("/crawl")
-        def web_crawler(url: str, langfacade: LangChainFacade = Depends()):
-            langfacade.crawler.crawl_data(url)
-
-    def tool_route(self):
-        @self.tool_router.post("/tool_search")
-        async def web_search(req: ChatRequest):
-            urls = await self.tools.duckduckgo_search(req.message)
-            contents = []
-            for url in urls:
-                content = await self.tools.crawl_web(url)
-                contents.append(content)
-            return contents
-
-        @self.tool_router.post("/web_fetch")
-        async def web_fetch(req: ChatRequest):
-            content = await self.tools.crawl_web(req.message)
-            return content
-
-        @self.tool_router.post("/fetch")
-        def web_asfetch(req: ChatRequest):
-            # content = await self.tools.crawl(req.message)
-            return StreamingResponse(
-                self.tools.ascrawl_web(req.message), media_type="text/event-stream"
-            )
-
+        #
+        # GRAPH
+        # 
         @self.router.post("/build-graph")
         async def build_graph(
             file: UploadFile = File(...), langfacade: LangChainFacade = Depends()
@@ -168,5 +146,29 @@ class LangChainController:
             )
 
         ...
+
+        #
+        # TOOL 
+        #
+        @self.tool_router.post("/tool_search")
+        async def web_search(req: ChatRequest):
+            urls = await self.tools.duckduckgo_search(req.message)
+            contents = []
+            for url in urls:
+                content = await self.tools.crawl_web(url)
+                contents.append(content)
+            return contents
+
+        @self.tool_router.post("/web_fetch")
+        async def web_fetch(req: ChatRequest):
+            content = await self.tools.crawl_web(req.message)
+            return content
+
+        @self.tool_router.post("/fetch")
+        def web_asfetch(req: ChatRequest):
+            # content = await self.tools.crawl(req.message)
+            return StreamingResponse(
+                self.tools.ascrawl_web(req.message), media_type="text/event-stream"
+            )
 
     ...

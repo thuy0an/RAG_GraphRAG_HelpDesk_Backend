@@ -7,7 +7,6 @@ from sqlmodel import text
 from SharedKernel.persistence.PersistenceManager import get_db_session
 from SharedKernel.persistence.Neo4jManager import get_neo4j_manager, Neo4jManager
 
-
 @Controller
 class SharedKernelController:
     def __init__(self, app: FastAPI) -> None:
@@ -56,3 +55,21 @@ class SharedKernelController:
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     data={"status": "unhealthy", "error": str(e)},
                 )
+        
+        @self.router.get("/test")
+        def test():
+            from langchain_community.graphs import Neo4jGraph
+            from langchain_ollama import ChatOllama
+
+            graph = Neo4jGraph(
+                url="bolt://localhost:7857",
+                username="neo4j",
+                password="password"
+            )
+
+            graph.refresh_schema()
+
+            llm = ChatOllama(
+                model=""
+            )
+        

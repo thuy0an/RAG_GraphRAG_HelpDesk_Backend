@@ -14,7 +14,7 @@ class LangChainFacade:
         thread_pool: ThreadPoolManager = Depends() 
     ):       
         self.ai_factory = config_ai
-        ai_config = self.ai_factory.create(config.ai.llm_provider)
+        ai_config = self.ai_factory.create(config.llm.provider)
         self.provider = ai_config.create_provider()
 
         self.prompt_service = PromptService()
