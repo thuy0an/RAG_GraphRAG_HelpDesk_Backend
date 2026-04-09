@@ -3,7 +3,7 @@ from typing import List, Optional
 from pydantic import BaseModel
 from Features.LangChainAPI.LangChainFacade import LangChainFacade
 from Features.LangChainAPI.LangTools import LangTools
-from SharedKernel.config.AIConfig import AIConfigFactory
+from SharedKernel.config.LLMConfig import LLMFactory
 from fastapi import APIRouter, Depends, FastAPI, File, UploadFile, status
 from fastapi.responses import StreamingResponse
 from Features.LangChainAPI.LangChainDTO import ChatRequest
@@ -42,7 +42,8 @@ class LangChainController:
 
         @self.router.post("/load_document_pdf_PaC")
         async def load_document_pdf_PaC(
-            files: List[UploadFile] = File(...), langfacade: LangChainFacade = Depends()
+            files: List[UploadFile] = File(...), 
+            langfacade: LangChainFacade = Depends()
         ):
             for file in files:
                 await langfacade.synthesizer.ingest_file_PaC(file)
@@ -58,7 +59,8 @@ class LangChainController:
 
         @self.router.delete("/delete_document")
         async def delete_document(
-            req: DeleteDocumentRequest, langfacade: LangChainFacade = Depends()
+            req: DeleteDocumentRequest, 
+            langfacade: LangChainFacade = Depends()
         ):
             await langfacade.synthesizer.delete_document_by_file_name(req.filename)
             return APIResponse(
@@ -74,7 +76,8 @@ class LangChainController:
 
         @self.router.post("/retrieve_document")
         async def retrieve_document(
-            req: RetrieveDocumentRequest, langfacade: LangChainFacade = Depends()
+            req: RetrieveDocumentRequest, 
+            langfacade: LangChainFacade = Depends()
         ):
             return StreamingResponse(
                 await langfacade.synthesizer.retriver_documents_PaC(req.query, req.session_id),
@@ -87,7 +90,8 @@ class LangChainController:
         # 
         @self.router.post("/build-graph")
         async def build_graph(
-            file: UploadFile = File(...), langfacade: LangChainFacade = Depends()
+            file: UploadFile = File(...), 
+            langfacade: LangChainFacade = Depends()
         ):
             source = file.filename
             result = await langfacade.synthesizer.build_graph(file, source)
@@ -98,7 +102,10 @@ class LangChainController:
             )
 
         @self.router.get("/graph/{source}/stats")
-        async def get_graph_stats(source: str, langfacade: LangChainFacade = Depends()):
+        async def get_graph_stats(
+            source: str, 
+            langfacade: LangChainFacade = Depends()
+        ):
             stats = await langfacade.synthesizer.neo4j_store.get_graph_stats(source)
             return APIResponse(
                 message="Graph stats retrieved",
@@ -112,7 +119,8 @@ class LangChainController:
 
         @self.router.post("/graph/search")
         async def search_graph(
-            req: GraphSearchRequest, langfacade: LangChainFacade = Depends()
+            req: GraphSearchRequest, 
+            langfacade: LangChainFacade = Depends()
         ):
             results = await langfacade.synthesizer.neo4j_store.search_by_embedding(
                 req.query, req.top_k
@@ -129,7 +137,8 @@ class LangChainController:
 
         @self.router.post("/graph/query")
         async def query_graph(
-            req: GraphQueryRequest, langfacade: LangChainFacade = Depends()
+            req: GraphQueryRequest, 
+            langfacade: LangChainFacade = Depends()
         ):
             result = await langfacade.synthesizer.query_graph_rag(req.query, req.source)
             return APIResponse(
@@ -137,7 +146,10 @@ class LangChainController:
             )
 
         @self.router.delete("/graph/{source}")
-        async def delete_graph(source: str, langfacade: LangChainFacade = Depends()):
+        async def delete_graph(
+            source: str, 
+            langfacade: LangChainFacade = Depends()
+        ):
             await langfacade.synthesizer.neo4j_store.delete_graph(source)
             return APIResponse(
                 message="Graph deleted successfully",

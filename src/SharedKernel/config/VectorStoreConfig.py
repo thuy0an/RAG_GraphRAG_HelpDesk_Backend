@@ -1,8 +1,6 @@
 from abc import ABC, abstractmethod
-import logging
 from typing import Any, Dict, Type
-
-from langchain_community.storage import RedisStore
+from SharedKernel.base.Logger import get_logger
 from SharedKernel.utils.yamlenv import load_env_yaml, load_redis_index
 from langchain_core.embeddings.embeddings import Embeddings
 from langchain_core.vectorstores import InMemoryVectorStore, VectorStore
@@ -11,20 +9,20 @@ from redis.client import Redis as RedisClient
 from langchain_redis import RedisVectorStore
 import uuid6
 
-logging.basicConfig(level=logging.INFO)
-log = logging.getLogger(__name__)
-
+log = get_logger(__name__)
 config: dict[str, Any] = load_env_yaml()
 redis_config: dict[str, Any] = load_redis_index()
+
 
 class VectoreStoreConfig(ABC):
     @abstractmethod
     def get_vecstore(self, embedding: Embeddings) -> VectorStore:
         pass
-    
+
     @abstractmethod
     def get_url(self) -> str:
         pass
+
 
 class VectoreStoreConfigFactory:
     _registry: Dict[str, Type[VectoreStoreConfig]] = {}
@@ -40,23 +38,24 @@ class VectoreStoreConfigFactory:
             raise ValueError(f"Vector store config '{type_name}' is not registered.")
         return ai_config_class()
 
+
 """
 Config Redis Vector Store
 """
+
 class RedisVSManager(VectoreStoreConfig):
-    new_id = uuid6.uuid7()
-    
     def __init__(self) -> None:
         self.redis_url: str = config.redis.url
+        self.index_name = redis_config["index"]["name"]
+        self.prefix = redis_config["index"]["prefix"]
 
-        self.index_name = redis_config['index']['name']
-        self.prefix = redis_config['index']['prefix']
-
-        log.info(f"Redis config - URL: {self.redis_url}, Index: {self.index_name}, Prefix: {self.prefix}")
+        log.info(
+            f"Redis config - URL: {self.redis_url}, Index: {self.index_name}, Prefix: {self.prefix}"
+        )
 
     def _check_index(self, client: RedisClient, index_name: str):
-            client.execute_command('FT.INFO', index_name)
-            log.info(f"Index: '{index_name}' exists")
+        client.execute_command("FT.INFO", index_name)
+        log.info(f"Index: '{index_name}' exists")
 
     def get_url(self):
         return self.redis_url
@@ -71,7 +70,7 @@ class RedisVSManager(VectoreStoreConfig):
                 redis_url=self.redis_url,
                 index_name=self.index_name,
             )
-            print(f"✅ Redis vector store with index: {self.index_name}")
+            log.info(f"✅ Redis vector store with index: {self.index_name}")
         except Exception as e:
             log.warning(f"{e}")
 
@@ -85,16 +84,18 @@ class RedisVSManager(VectoreStoreConfig):
                 redis_url=self.redis_url,
                 index_name=self.index_name,
             )
-            print(f"✅ Created new index: {self.index_name}")
+            log.info(f"✅ Created new index: {self.index_name}")
         return vector_store
+
 
 class InMemVSManager(VectoreStoreConfig):
     def __init__(self) -> None:
         pass
 
-    def create_vector_store(self, embedding: Embeddings) -> VectorStore: 
+    def create_vector_store(self, embedding: Embeddings) -> VectorStore:
         return InMemoryVectorStore(embedding=embedding)
         ...
+
 
 VectoreStoreConfigFactory.register("in_mem", InMemVSManager)
 VectoreStoreConfigFactory.register("redis", RedisVSManager)

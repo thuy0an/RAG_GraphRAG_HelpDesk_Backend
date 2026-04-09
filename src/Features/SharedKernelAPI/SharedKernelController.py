@@ -6,6 +6,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import text
 from SharedKernel.persistence.PersistenceManager import get_db_session
 from SharedKernel.persistence.Neo4jManager import get_neo4j_manager, Neo4jManager
+from SharedKernel.config.LLMConfig import LLMFactory, EmbeddingFactory
 
 @Controller
 class SharedKernelController:
@@ -56,6 +57,20 @@ class SharedKernelController:
                     data={"status": "unhealthy", "error": str(e)},
                 )
         
+        @self.router.get("/test_llm")
+        def test():
+            config = load_env_yaml()
+            provider_name = config.llm.provider
+            llm = LLMFactory.create(provider_name)
+            embed = EmbeddingFactory.create(provider_name)
+
+            query = "What is LangChain?"
+            query_vec = embed.embed_query(query)
+            print(query_vec)
+
+            response = llm.invoke("Explain RAG in simple terms")
+            print(response)
+
         @self.router.get("/test")
         def test():
             from langchain_community.graphs import Neo4jGraph

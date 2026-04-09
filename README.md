@@ -267,6 +267,8 @@ pip install -r packages.sh
 ```bash
 # Sau khi chạy script.sh, menu sẽ hoạt động nếu fzf đã được cài
 bash script.sh
+
+nhớ active rồi mới chạy server
 ```                             
 
 ## 🛠 Tech Stack
