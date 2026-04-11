@@ -18,8 +18,7 @@ AI_HelpDesk_Backend/
 │   │   ├── RealTimeAPI/         # API Real-time (WebSocket)
 │   │   │   ├── Chat/            # Module Chat real-time
 │   │   │   └── Storage/         # Module lưu trữ real-time
-│   │   ├── TicketAPI/           # API Quản lý ticket
-│   │   └── TicketRepliesAPI/    # API Trả lời ticket
+│   │   └── TicketAPI/           # API Quản lý ticket
 │   ├── SharedKernel/            # Shared components - Các thành phần dùng chung
 │   │   ├── ai/                  # Các service liên quan đến AI
 │   │   ├── base/                # Base classes và interfaces
