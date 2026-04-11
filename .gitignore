@@ -82,5 +82,4 @@ dmypy.json
 .vscode/
 specs/
 static/
-packages.sh
 config_env/
