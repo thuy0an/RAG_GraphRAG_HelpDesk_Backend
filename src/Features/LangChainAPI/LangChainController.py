@@ -3,11 +3,15 @@ from pydantic import BaseModel
 from Features.LangChainAPI.LangChainFacade import LangChainFacade
 from Features.LangChainAPI.LangTools import LangTools
 from SharedKernel.config.LLMConfig import LLMFactory
-from fastapi import APIRouter, Depends, FastAPI, File, UploadFile, status
+import asyncio
+import io
+from fastapi import APIRouter, Depends, FastAPI, File, UploadFile, status, Form, Query
+from starlette.datastructures import Headers
 from fastapi.responses import StreamingResponse
 from Features.LangChainAPI.LangChainDTO import ChatRequest
 from SharedKernel.persistence.Decorators import Controller
 from src.SharedKernel.base.APIResponse import APIResponse
+from src.Features.LangChainAPI.persistence.CompareRepository import CompareRepository
 
 
 @Controller
@@ -21,6 +25,7 @@ class LangChainController:
         self.app.include_router(self.router)
 
     def register_route(self):
+        compare_repo = CompareRepository()
         #
         # RAG
         #
@@ -41,11 +46,21 @@ class LangChainController:
 
         @self.router.post("/load_document_pdf_PaC")
         async def load_document_pdf_PaC(
-            files: List[UploadFile] = File(...), 
-            langfacade: LangChainFacade = Depends()
+            files: List[UploadFile] = File(...),
+            parent_chunk_size: int | None = Form(None),
+            parent_chunk_overlap: int | None = Form(None),
+            child_chunk_size: int | None = Form(None),
+            child_chunk_overlap: int | None = Form(None),
+            langfacade: LangChainFacade = Depends(),
         ):
             for file in files:
-                await langfacade.PaCRAG.index(file)
+                await langfacade.PaCRAG.index(
+                    file,
+                    parent_chunk_size=parent_chunk_size,
+                    parent_chunk_overlap=parent_chunk_overlap,
+                    child_chunk_size=child_chunk_size,
+                    child_chunk_overlap=child_chunk_overlap,
+                )
 
             return APIResponse(
                 message=f"Successfully indexing {len(files)} PDF file(s)",
@@ -68,6 +83,172 @@ class LangChainController:
                 data=None,
             )
             ...
+
+        @self.router.delete("/clear_history/{session_id}")
+        async def clear_chat_history(
+            session_id: str,
+            langfacade: LangChainFacade = Depends(),
+        ):
+            deleted = await langfacade.PaCRAG.clear_history(session_id)
+            return APIResponse(
+                message="Chat history cleared",
+                status_code=status.HTTP_200_OK,
+                data={"deleted": deleted},
+            )
+
+        @self.router.delete("/clear_vector_store")
+        async def clear_vector_store(
+            source: str | None = Query(default=None),
+            langfacade: LangChainFacade = Depends(),
+        ):
+            await langfacade.PaCRAG.clear_vector_store(source)
+            return APIResponse(
+                message="Vector store cleared",
+                status_code=status.HTTP_200_OK,
+                data={"source": source},
+            )
+
+        #
+        # COMPARE (PaCRAG vs GraphRAG)
+        #
+        @self.router.post("/compare/upload")
+        async def compare_upload(
+            files: List[UploadFile] = File(...),
+            session_id: str = Form(...),
+            parent_chunk_size: int | None = Form(None),
+            parent_chunk_overlap: int | None = Form(None),
+            child_chunk_size: int | None = Form(None),
+            child_chunk_overlap: int | None = Form(None),
+            langfacade: LangChainFacade = Depends(),
+        ):
+            results = []
+
+            for file in files:
+                content = await file.read()
+                content_type = file.content_type or "application/octet-stream"
+                upload_headers = Headers({"content-type": content_type})
+                pac_file = UploadFile(
+                    filename=file.filename,
+                    file=io.BytesIO(content),
+                    headers=upload_headers,
+                )
+                graph_file = UploadFile(
+                    filename=file.filename,
+                    file=io.BytesIO(content),
+                    headers=upload_headers,
+                )
+
+                pac_task = langfacade.PaCRAG.index_with_metrics(
+                    pac_file,
+                    parent_chunk_size=parent_chunk_size,
+                    parent_chunk_overlap=parent_chunk_overlap,
+                    child_chunk_size=child_chunk_size,
+                    child_chunk_overlap=child_chunk_overlap,
+                )
+                graph_task = langfacade.GraphRAG.ingest(graph_file, file.filename)
+
+                pac_result, graph_result = await asyncio.gather(
+                    pac_task, graph_task, return_exceptions=True
+                )
+
+                errors = {}
+                if isinstance(pac_result, Exception):
+                    errors["pac"] = str(pac_result)
+                    pac_metrics = {}
+                else:
+                    pac_metrics = pac_result
+
+                if isinstance(graph_result, Exception):
+                    errors["graphrag"] = str(graph_result)
+                    graph_metrics = {}
+                else:
+                    graph_metrics = graph_result
+
+                run = await compare_repo.create_run(
+                    session_id=session_id,
+                    file_name=file.filename,
+                    file_type=content_type,
+                    file_size=len(content),
+                    pac_ingest=pac_metrics,
+                    graphrag_ingest=graph_metrics,
+                    errors=errors or None,
+                )
+
+                results.append(run)
+
+            return APIResponse(
+                message="Comparison ingest completed",
+                status_code=status.HTTP_200_OK,
+                data={"runs": results},
+            )
+
+        class CompareQueryRequest(BaseModel):
+            session_id: str
+            run_id: str
+            query: str
+
+        @self.router.post("/compare/query")
+        async def compare_query(
+            req: CompareQueryRequest,
+            langfacade: LangChainFacade = Depends(),
+        ):
+            pac_task = langfacade.PaCRAG.retrieve_full(req.query, session_id=req.session_id)
+            graph_task = langfacade.GraphRAG.retrieve_with_metrics(req.query, source=None)
+
+            pac_result, graph_result = await asyncio.gather(
+                pac_task, graph_task, return_exceptions=True
+            )
+
+            errors = {}
+            pac_metrics = None
+            graph_metrics = None
+
+            if isinstance(pac_result, Exception):
+                errors["pac"] = str(pac_result)
+            else:
+                pac_metrics = pac_result
+
+            if isinstance(graph_result, Exception):
+                errors["graphrag"] = str(graph_result)
+            else:
+                graph_metrics = graph_result
+
+            run = await compare_repo.update_query_metrics(
+                req.run_id,
+                pac_query=pac_metrics,
+                graphrag_query=graph_metrics,
+            )
+
+            return APIResponse(
+                message="Comparison query completed",
+                status_code=status.HTTP_200_OK,
+                data={
+                    "run": run,
+                    "errors": errors or None,
+                },
+            )
+
+        @self.router.get("/compare/history/{session_id}")
+        async def compare_history(
+            session_id: str,
+        ):
+            runs = await compare_repo.list_runs(session_id)
+            return APIResponse(
+                message="Comparison history retrieved",
+                status_code=status.HTTP_200_OK,
+                data={"runs": runs},
+            )
+
+        @self.router.delete("/compare/history/{run_id}")
+        async def compare_history_delete(
+            run_id: str,
+        ):
+            deleted = await compare_repo.delete_run(run_id)
+            return APIResponse(
+                message="Comparison run deleted",
+                status_code=status.HTTP_200_OK,
+                data={"deleted": deleted},
+            )
 
         class RetrieveDocumentRequest(BaseModel):
             query: str
@@ -105,7 +286,7 @@ class LangChainController:
             source: str,
             langfacade: LangChainFacade = Depends()
         ):
-            stats = await langfacade.GraphRAG.neo4j_store.get_graph_stats(source)
+            stats = langfacade.GraphRAG.internal.get_graph_stats(source)
             return APIResponse(
                 message="Graph stats retrieved",
                 status_code=status.HTTP_200_OK,

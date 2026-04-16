@@ -11,7 +11,14 @@ class Process:
     def __init__(self) -> None:
         ...
 
-    async def split_PaC(self, docs: List[Document]):
+    async def split_PaC(
+        self,
+        docs: List[Document],
+        parent_chunk_size: int | None = None,
+        parent_chunk_overlap: int | None = None,
+        child_chunk_size: int | None = None,
+        child_chunk_overlap: int | None = None,
+    ):
         full_text = ""
         page_map = []
         cursor = 0
@@ -31,15 +38,15 @@ class Process:
             cursor = end + 1
 
         parent_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=config.llm.splitter.PaC.parent_chunk_size,
-            chunk_overlap=config.llm.splitter.PaC.parent_chunk_overlap,
+            chunk_size=parent_chunk_size or config.llm.splitter.PaC.parent_chunk_size,
+            chunk_overlap=parent_chunk_overlap or config.llm.splitter.PaC.parent_chunk_overlap,
             separators=config.llm.splitter.separators.law,
             add_start_index=True
         )
 
         child_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=config.llm.splitter.PaC.child_chunk_size,
-            chunk_overlap=config.llm.splitter.PaC.child_chunk_overlap,
+            chunk_size=child_chunk_size or config.llm.splitter.PaC.child_chunk_size,
+            chunk_overlap=child_chunk_overlap or config.llm.splitter.PaC.child_chunk_overlap,
             separators=config.llm.splitter.separators.law,
             add_start_index=True
         )

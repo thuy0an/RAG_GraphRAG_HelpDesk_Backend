@@ -49,12 +49,16 @@ class OllamaProvider(BaseLLMProvider, BaseEmbeddingProvider):
         self.model = config.llm.ollama.model
         self.host = config.llm.ollama.host
         self.embedding_model = config.llm.ollama.embed
+        self.num_predict = getattr(config.llm.ollama, "num_predict", None)
 
     def get_llm(self) -> BaseChatModel:
-        return ChatOllama(
-            model=self.model,
-            base_url=self.host
-        )
+        params = {
+            "model": self.model,
+            "base_url": self.host,
+        }
+        if self.num_predict is not None:
+            params["num_predict"] = self.num_predict
+        return ChatOllama(**params)
 
     def get_embedding(self) -> Embeddings:
         return OllamaEmbeddings(

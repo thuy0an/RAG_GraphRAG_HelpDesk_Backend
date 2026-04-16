@@ -7,6 +7,7 @@ from fastapi import UploadFile
 from langchain_community.document_loaders import (
     PlaywrightURLLoader,
     UnstructuredPDFLoader,
+    Docx2txtLoader,
 )
 from langchain_core.documents import Document
 from src.SharedKernel.exception.APIException import APIException
@@ -20,6 +21,8 @@ class Loader:
     def __init__(self) -> None:
         self.loaders = {
             ".pdf": self.load_pdf,
+            ".doc": self.load_docx,
+            ".docx": self.load_docx,
             ".txt": self.load_txt,
             ".md": self.load_txt,
             ".html": self.load_html,
@@ -77,6 +80,39 @@ class Loader:
             formatted_docs.append(formatted_doc)
         os.unlink(temp_path)
 
+        return formatted_docs
+
+    async def load_docx(self, file: UploadFile):
+        if file.filename and not file.filename.lower().endswith((".doc", ".docx")):
+            raise APIException(f"File {file.filename} is not a DOCX file")
+
+        suffix = ".docx" if file.filename and file.filename.lower().endswith(".docx") else ".doc"
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as temp_file:
+            shutil.copyfileobj(file.file, temp_file)
+            temp_path = temp_file.name
+            temp_file.close()
+
+        file_size_kb = os.path.getsize(temp_path) / 1024
+        suffix_label = os.path.splitext(file.filename)[1].upper() if file.filename else ".DOCX"
+        logger.info(
+            f"DOCUMENT LOADER\nFile:  {file.filename}\nType:  {suffix_label}\nSize:  {file_size_kb:.1f} KB"
+        )
+
+        loader = Docx2txtLoader(temp_path)
+        documents = loader.load()
+
+        formatted_docs = []
+        for doc in documents:
+            metadata = {
+                "page_number": 1,
+                "source": file.filename,
+                "language": doc.metadata.get("language", "unknown"),
+                "content_type": file.content_type,
+            }
+            formatted_doc = Document(page_content=doc.page_content, metadata=metadata)
+            formatted_docs.append(formatted_doc)
+
+        os.unlink(temp_path)
         return formatted_docs
 
     async def load_txt(self, file: UploadFile):

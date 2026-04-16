@@ -1,12 +1,16 @@
 import logging
-from typing import Any, Dict, List
-from langchain_core.language_models.chat_models import BaseChatModel
-from langchain.embeddings import Embeddings
+import time
+from typing import List
+
 from fastapi import UploadFile
+from langchain.embeddings import Embeddings
+from langchain_core.language_models.chat_models import BaseChatModel
+
 from src.SharedKernel.base.Metrics import Metrics
+from src.SharedKernel.utils.yamlenv import load_env_yaml
 from src.Features.LangChainAPI.RAG.BaseRAG import BaseRAG
-from src.Features.LangChainAPI.RAG.LexicalGraphBuilder import LexicalGraphBuilder
 from src.Features.LangChainAPI.persistence.Neo4JStore import Neo4JStore
+from src.Features.LangChainAPI.RAG.GraphRAGInternal import GraphRAGInternal
 from SharedKernel.threading.ThreadPoolManager import ThreadPoolManager
 
 log = logging.getLogger(__name__)
@@ -20,8 +24,9 @@ class GraphRAG(BaseRAG):
     ) -> None:
         super().__init__(provider, embedding)
         self._neo4j_store = None
-        self._lexical_builder = None
         self.thread_pool = ThreadPoolManager()
+        self._config = load_env_yaml()
+        self._internal = None
 
     @property
     def neo4j_store(self):
@@ -30,56 +35,62 @@ class GraphRAG(BaseRAG):
         return self._neo4j_store
 
     @property
-    def lexical_builder(self):
-        if self._lexical_builder is None:
-            self._lexical_builder = LexicalGraphBuilder(
-                process=self.process,
-                embedding_model=self.embedding,
-                llm_provider=self.provider,
+    def internal(self) -> GraphRAGInternal:
+        if self._internal is None:
+            self._internal = GraphRAGInternal(
+                provider=self.provider,
+                embedding=self.embedding,
                 neo4j_store=self.neo4j_store,
+                config=self._config,
             )
-        return self._lexical_builder
+        return self._internal
 
-    async def ingest(self, file: UploadFile, source: str = None, **kwargs) -> None:
-        """Build Lexical Graph từ file - có metrics + logging"""
+    async def ingest(self, file: UploadFile, source: str = None, **kwargs) -> dict:
+        """Build Lexical Graph from file using ProjectGraphRAG pipeline."""
         if not source:
             source = file.filename
 
         metrics = Metrics("BuildLexicalGraph")
-        log.info(f"======= Starting LexicalGraph: {source} =======")
+        log.info(f"======= Starting GraphRAG Pipeline: {source} =======")
 
         try:
             with metrics.stage("load_documents"):
-                docs = await self.thread_pool.run_in_executor(
-                    self.loader.load_file, file
+                chunks = await self.thread_pool.run_in_executor(
+                    self.internal.load_and_chunk_file, file
                 )
-            metrics.increment("documents_count", len(docs))
-            log.info(f"✓ Loaded {len(docs)} documents")
+
+            if not chunks:
+                raise ValueError("No text extracted from file")
+
+            metrics.increment("chunks_count", len(chunks))
+            log.info(f"✓ Loaded {len(chunks)} chunks")
 
             with metrics.stage("build_graph"):
-                result = await self.lexical_builder.build_graph(docs, source)
+                result = await self.thread_pool.run_in_executor(
+                    self.internal.build_lexical_graph, chunks, source
+                )
 
             metrics.increment("sections_count", result.get("sections", 0))
-            metrics.increment("chunks_count", result.get("chunks", 0))
             metrics.increment("entities_count", result.get("entities", 0))
-            metrics.increment("nodes_count", result.get("nodes", 0))
-            metrics.increment("edges_count", result.get("edges", 0))
+            metrics.increment("relations_count", result.get("relations", 0))
 
-            log.info(f"✓ Graph built: {result}")
-
-            with metrics.stage("store_neo4j"):
-                log.info(f"✓ Stored to Neo4j")
+            with metrics.stage("faiss_index"):
+                self.internal.upsert_faiss_index(chunks)
 
             metrics.log_summary()
-            log.info(f"======= Completed LexicalGraph: {source} =======")
+            log.info(f"======= Completed GraphRAG Pipeline: {source} =======")
 
             return result
 
         except Exception as e:
-            log.error(f"LexicalGraph pipeline failed: {str(e)}")
+            log.error(f"GraphRAG pipeline failed: {str(e)}")
             metrics.increment("error_count", 1)
             metrics.log_summary()
             raise
+
+    async def index(self, file: UploadFile, **kwargs) -> None:
+        """Alias for ingest to satisfy BaseRAG contract."""
+        await self.ingest(file, **kwargs)
 
     async def retrieve(
         self,
@@ -88,142 +99,102 @@ class GraphRAG(BaseRAG):
         source: str = None,
         **kwargs
     ) -> dict:
-        """Graph RAG query pipeline - có metrics + logging"""
+        """Graph RAG query pipeline using ProjectGraphRAG query chain."""
         metrics = Metrics("GraphRAGQuery")
-        log.info(f"Starting Graph RAG query: {query}")
+        log.info(f"Starting GraphRAG query: {query}")
 
         try:
-            with metrics.stage("extract_entities"):
-                entities = await self.extract_query_entities(query)
-            metrics.increment("entities_count", len(entities))
-            log.info(f"Extracted {len(entities)} entities: {entities}")
+            if session_id:
+                with metrics.stage("memory_add_user"):
+                    await self.memory_repo.add_message(
+                        session_id=session_id, role="user", content=query
+                    )
 
+            with metrics.stage("embed_query"):
+                query_embedding = self.embedding.embed_query(query)
+
+            doc_ids = [self.internal._uid(source)] if source else None
             with metrics.stage("vector_search"):
-                seed_chunks = await self.neo4j_store.search_by_embedding(
-                    query, top_k=5
-                )
-            metrics.increment("seed_chunks_count", len(seed_chunks))
-
-            with metrics.stage("subgraph_traversal"):
-                facts = await self.traverse_subgraph(
-                    [c["node_id"] for c in seed_chunks], depth=2
-                )
-            metrics.increment("facts_count", len(facts))
-
-            with metrics.stage("section_summaries"):
-                section_summaries = await self.get_section_summaries(
-                    [c["node_id"] for c in seed_chunks]
+                hits = self.internal.vector_search_chunks(
+                    query_embedding, k=self.internal.top_k, doc_ids=doc_ids
                 )
 
-            with metrics.stage("document_summary"):
-                document_summary = (
-                    await self.get_document_summary(source) if source else ""
+            if not hits:
+                metrics.increment("empty_hits", 1)
+                metrics.log_summary()
+                return {
+                    "answer": "Chưa có dữ liệu GraphRAG. Vui lòng upload tài liệu trước.",
+                    "sources": [],
+                    "entities": [],
+                }
+
+            doc_passages, section_ids, doc_ids = self.internal.collect_context(hits)
+
+            with metrics.stage("extract_entities"):
+                entities = self.internal.extract_query_entities(query)
+            metrics.increment("entities_count", len(entities))
+
+            with metrics.stage("graph_traversal"):
+                graph_facts = self.internal.get_entity_subgraph(
+                    entities, depth=self.internal._graph_depth
                 )
+
+            with metrics.stage("hierarchical_context"):
+                section_summaries = self.internal.get_section_summaries(list(section_ids))
+                doc_summary_parts = self.internal.get_document_summaries(list(doc_ids))
 
             with metrics.stage("llm_generation"):
-                answer = await self.generate_answer(
-                    question=query,
-                    seed_chunks=seed_chunks,
-                    facts=facts,
-                    section_summaries=section_summaries,
-                    document_summary=document_summary,
+                prompt = self.internal.build_answer_prompt(
+                    doc_summary_parts,
+                    section_summaries,
+                    graph_facts,
+                    doc_passages,
+                    query,
                 )
+                response = self.provider.invoke(prompt)
+                answer = response.content.strip()
+
+            if session_id:
+                with metrics.stage("memory_add_assistant"):
+                    await self.memory_repo.add_message(
+                        session_id=session_id, role="assistant", content=answer
+                    )
 
             metrics.log_summary()
-            log.info(f"Graph RAG query completed")
+            log.info("GraphRAG query completed")
 
-            return {"answer": answer, "sources": seed_chunks, "entities": entities}
+            sources = self.internal.get_document_names(list(doc_ids))
+            return {"answer": answer, "sources": sources, "entities": entities}
 
         except Exception as e:
-            log.error(f"Graph RAG query failed: {str(e)}")
+            log.error(f"GraphRAG query failed: {str(e)}")
             metrics.increment("error_count", 1)
             metrics.log_summary()
             raise
 
-    async def delete(self, identifier: str, **kwargs) -> None:
-        """Delete nodes by source"""
-        await self.neo4j_store.delete_by_source(identifier)
-
-    async def extract_query_entities(self, question: str) -> List[str]:
-        """Extract entities từ câu hỏi bằng LLM"""
-        prompt = f"""
-            Extract entities from the question: {question}
-
-            Return list of entity names only (one per line):
-        """
-        try:
-            response = self.provider.invoke(prompt)
-            entities = [e.strip() for e in response.content.split("\n") if e.strip()]
-            return entities
-        except Exception as e:
-            log.error(f"Entity extraction failed: {e}")
-            return []
-
-    async def traverse_subgraph(
-        self, chunk_ids: List[str], depth: int = 2
-    ) -> List[Dict]:
-        """Traverse relations để lấy related entities và facts"""
-        facts = []
-
-        for chunk_id in chunk_ids:
-            neighbors = await self.neo4j_store.get_neighbors(chunk_id, depth=depth)
-            facts.extend(neighbors)
-
-        return facts
-
-    async def get_section_summaries(self, chunk_ids: List[str]) -> List[str]:
-        """Lấy section summaries cho hierarchical context"""
-        summaries = []
-
-        for chunk_id in chunk_ids:
-            section = await self.neo4j_store.get_parent_section(chunk_id)
-            if section:
-                summaries.append(section.get("summary", ""))
-
-        return summaries
-
-    async def get_document_summary(self, source: str) -> str:
-        """Lấy global document summary"""
-        return await self.neo4j_store.get_document_summary(source)
-
-    async def generate_answer(
+    async def retrieve_with_metrics(
         self,
-        question: str,
-        seed_chunks: List[Dict],
-        facts: List[Dict],
-        section_summaries: List[str],
-        document_summary: str,
-    ) -> str:
-        """Generate answer từ context"""
+        query: str,
+        session_id: str = None,
+        source: str = None,
+        **kwargs
+    ) -> dict:
+        start = time.perf_counter()
+        result = await self.retrieve(query, session_id=session_id, source=source, **kwargs)
+        total_time = time.perf_counter() - start
+        answer = result.get("answer", "")
+        return {
+            "answer": answer,
+            "sources": result.get("sources", []),
+            "entities": result.get("entities", []),
+            "time_total_s": round(total_time, 2),
+            "answer_tokens": len(answer.split()),
+        }
 
-        context = f"""
-            Document Summary:
-            {document_summary}
+    async def delete(self, identifier: str, **kwargs) -> None:
+        """Delete document graph by filename."""
+        if not identifier:
+            return
 
-            Section Summaries:
-            {chr(10).join(section_summaries)}
-
-            Relevant Facts:
-            {chr(10).join([str(f) for f in facts])}
-
-            Seed Chunks:
-            {chr(10).join([c.get("content", "") for c in seed_chunks])}
-            """
-
-        prompt = f"""
-            Based on the following context, answer the question.
-
-            Context:
-            {context}
-
-            Question: {question}
-
-            Answer:
-            """
-
-        try:
-            response = self.provider.invoke(prompt)
-            return response.content
-        except Exception as e:
-            log.error(f"LLM generation failed: {e}")
-            return "Xin lỗi, tôi không thể trả lời câu hỏi này."
+        doc_id = self.internal._uid(identifier)
+        self.internal.delete_document(doc_id)

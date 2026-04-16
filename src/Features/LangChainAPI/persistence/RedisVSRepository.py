@@ -195,6 +195,78 @@ class RedisVSRepository:
             log.error(f"Error deleting documents: {e}")
             return
 
+    async def delete_all_documents(self):
+        """Delete all documents and parent docs from Redis vector store."""
+        try:
+            r = self._manager.get_redis(self.redis_url)
+            index = self._manager.get_search_index(self.redis_url)
+
+            BATCH_SIZE = 500
+            PIPELINE_BATCH = 500
+
+            deleted_count = 0
+
+            while True:
+                filter_query = FilterQuery(
+                    return_fields=["id"],
+                    filter_expression="*",
+                    num_results=BATCH_SIZE,
+                )
+
+                results = index.query(filter_query)
+                if not results:
+                    break
+
+                pipeline = r.pipeline()
+                batch_count = 0
+
+                for result in results:
+                    doc_id = result.get("id")
+                    if doc_id:
+                        pipeline.unlink(doc_id)
+                        batch_count += 1
+                        deleted_count += 1
+
+                    if batch_count == PIPELINE_BATCH:
+                        pipeline.execute()
+                        pipeline = r.pipeline()
+                        batch_count = 0
+
+                pipeline.execute()
+
+            # Delete all parent docs
+            cursor = 0
+            deleted_parents = 0
+            while True:
+                cursor, keys = r.scan(cursor, match="parent_docs:*", count=100)
+                if not keys:
+                    if cursor == 0:
+                        break
+                    continue
+
+                pipeline = r.pipeline()
+                batch_count = 0
+
+                for key in keys:
+                    pipeline.unlink(key)
+                    batch_count += 1
+                    deleted_parents += 1
+
+                    if batch_count == PIPELINE_BATCH:
+                        pipeline.execute()
+                        pipeline = r.pipeline()
+                        batch_count = 0
+
+                pipeline.execute()
+
+                if cursor == 0:
+                    break
+
+            log.info(f"Deleted {deleted_count} vector docs and {deleted_parents} parent docs (all)")
+        except Exception as e:
+            log.error(f"Error deleting all documents: {e}")
+            return
+
     # ============================================================
     # SEARCH/RETRIEVE OPERATIONS
     # ============================================================

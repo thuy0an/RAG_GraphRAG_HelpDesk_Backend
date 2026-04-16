@@ -2,6 +2,13 @@
 
 Hệ thống hỗ trợ khách hàng thông minh sử dụng AI, được xây dựng với Fastapi và Langchain Framework
 
+## Lênh chay
+Set-Location D:\YayCode\CodeWithPython\ProjectPTPMMNM
+.\.venv\Scripts\Activate.ps1
+Set-Location .\AI_HelpDesk_Backend
+$env:PYTHONPATH = "src"
+python -m uvicorn src.main:app --reload --host 0.0.0.0 --port 8080
+
 ## 🚀 Project Structure
 
 Cấu trúc thư mục của dự án AI HelpDesk Backend:
@@ -218,6 +225,14 @@ fields:
   - name: parent_id
     type: tag
 ```
+
+### GraphRAG upgrade notes
+
+- GraphRAG now uses a ProjectGraphRAG-style lexical pipeline with FAISS and Neo4j.
+- Required Python packages: `pymupdf`, `docx2txt`, and `faiss-cpu`.
+- Configure GraphRAG settings in `config_env/config.yaml` under `graph_rag`:
+  - `faiss_index_dir` for the FAISS index path
+  - `label_prefix` to avoid Neo4j label collisions
 
 ## 📋 Prerequisites (Windows)
 Cài đặt **Scoop** và các apps cần thiết:
