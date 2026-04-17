@@ -337,6 +337,18 @@ class LangChainController:
                 data=None,
             )
 
+        @self.router.delete("/graph")
+        async def delete_all_graph(
+            langfacade: LangChainFacade = Depends()
+        ):
+            """Xóa toàn bộ Neo4j graph (không có source cụ thể)"""
+            await langfacade.GraphRAG.neo4j_store.delete_graph(source=None)
+            return APIResponse(
+                message="All graph data deleted successfully",
+                status_code=status.HTTP_200_OK,
+                data=None,
+            )
+
         ...
 
         #
