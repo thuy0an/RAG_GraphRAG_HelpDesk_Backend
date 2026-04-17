@@ -180,7 +180,7 @@ Answer:"""
             return {}
         return {}
 
-    def load_and_chunk_file(self, file: UploadFile) -> List[Document]:
+    def load_and_chunk_file(self, file: UploadFile, chunk_size: int = None, chunk_overlap: int = None) -> List[Document]:
         suffix = Path(file.filename or "").suffix.lower()
         with tempfile.NamedTemporaryFile(suffix=suffix or ".pdf", delete=False) as temp_file:
             file.file.seek(0)
@@ -193,14 +193,20 @@ Answer:"""
                 return []
 
             splitter = RecursiveCharacterTextSplitter(
-                chunk_size=self._chunk_size,
-                chunk_overlap=self._chunk_overlap,
+                chunk_size=chunk_size or self._chunk_size,
+                chunk_overlap=chunk_overlap or self._chunk_overlap,
             )
             chunks = splitter.split_documents(docs)
 
             for i, chunk in enumerate(chunks):
                 chunk.metadata["source_file"] = file.filename or temp_path.name
                 chunk.metadata["chunk_index"] = i
+                page_number = chunk.metadata.get("page_number")
+                if page_number is None:
+                    page_number = chunk.metadata.get("page")
+                if isinstance(page_number, int) and page_number >= 0:
+                    page_number = page_number + 1
+                chunk.metadata["page_number"] = page_number
 
             return chunks
         finally:
@@ -303,6 +309,7 @@ Answer:"""
                 chunk.metadata["doc_id"] = doc_id
                 chunk.metadata["section_id"] = section_id
                 chunk.metadata["chunk_id"] = chunk_id
+                page_number = chunk.metadata.get("page_number")
                 embedding = embeddings[chunk_idx] if chunk_idx < len(embeddings) else []
                 self._upsert_chunk(
                     chunk_id=chunk_id,
@@ -310,6 +317,7 @@ Answer:"""
                     section_id=section_id,
                     index=chunk_idx,
                     text=chunk.page_content,
+                    page_number=page_number,
                     embedding=embedding,
                 )
                 if prev_chunk_id:
@@ -402,7 +410,8 @@ Answer:"""
                     YIELD node AS c, score
                     WHERE c.doc_id IN $doc_ids
                     RETURN c.id AS chunk_id, c.text AS text, c.doc_id AS doc_id,
-                           c.section_id AS section_id, c.index AS chunk_index, score
+                              c.section_id AS section_id, c.index AS chunk_index,
+                              c.page_number AS page_number, score
                     """,
                     {"k": k * 5, "embedding": query_embedding, "doc_ids": doc_ids},
                 )
@@ -413,7 +422,8 @@ Answer:"""
                 CALL db.index.vector.queryNodes('{self._vector_index_name}', $k, $embedding)
                 YIELD node AS c, score
                 RETURN c.id AS chunk_id, c.text AS text, c.doc_id AS doc_id,
-                       c.section_id AS section_id, c.index AS chunk_index, score
+                         c.section_id AS section_id, c.index AS chunk_index,
+                         c.page_number AS page_number, score
                 """,
                 {"k": k, "embedding": query_embedding},
             )
@@ -433,6 +443,7 @@ Answer:"""
                     "text": doc.page_content,
                     "doc_id": doc.metadata.get("doc_id"),
                     "section_id": doc.metadata.get("section_id"),
+                    "page_number": doc.metadata.get("page_number"),
                     "score": score,
                 })
                 if len(hits) >= k:
@@ -465,13 +476,43 @@ Answer:"""
             WITH c, dot_product / (sqrt(c_norm_sq) * sqrt(q_norm_sq)) AS score
             WHERE score > 0
             RETURN c.id AS chunk_id, c.text AS text, c.doc_id AS doc_id,
-                   c.section_id AS section_id, c.index AS chunk_index, score
+                   c.section_id AS section_id, c.index AS chunk_index,
+                   c.page_number AS page_number, score
             ORDER BY score DESC
             LIMIT $top_k
         """,
             params,
         )
         return results
+
+    def collect_source_pages(self, hits: List[Dict], doc_ids: List[str]) -> List[Dict]:
+        if not doc_ids:
+            return []
+
+        pages_by_doc: Dict[str, set] = {doc_id: set() for doc_id in doc_ids}
+
+        for hit in hits:
+            doc_id = hit.get("doc_id")
+            if not doc_id or doc_id not in pages_by_doc:
+                continue
+            page_number = hit.get("page_number")
+            if isinstance(page_number, int):
+                pages_by_doc[doc_id].add(page_number)
+
+        doc_names = self.get_document_names(doc_ids)
+        id_to_name = {doc_ids[i]: doc_names[i] for i in range(len(doc_ids))}
+
+        sources = []
+        for doc_id in doc_ids:
+            pages = sorted(pages_by_doc.get(doc_id, set()))
+            sources.append(
+                {
+                    "filename": id_to_name.get(doc_id, doc_id),
+                    "pages": pages,
+                }
+            )
+
+        return sources
 
     def get_graph_stats(self, source: Optional[str] = None) -> Dict:
         doc_label = self._label("Document")
@@ -690,6 +731,7 @@ Answer:"""
         section_id: str,
         index: int,
         text: str,
+        page_number: Optional[int],
         embedding: List[float],
     ) -> None:
         chunk_label = self._label("Chunk")
@@ -699,7 +741,7 @@ Answer:"""
             MERGE (c:{chunk_label} {{id: $id}})
             SET c.doc_id = $doc_id, c.section_id = $section_id,
                 c.index = $index, c.text = $text, c.content = $text,
-                c.embedding = $embedding
+                c.page_number = $page_number, c.embedding = $embedding
             WITH c
             MATCH (s:{section_label} {{id: $section_id}})
             MERGE (s)-[:HAS_CHUNK]->(c)
@@ -710,6 +752,7 @@ Answer:"""
                 "section_id": section_id,
                 "index": index,
                 "text": text,
+                "page_number": page_number,
                 "embedding": embedding,
             },
         )

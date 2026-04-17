@@ -45,7 +45,7 @@ class GraphRAG(BaseRAG):
             )
         return self._internal
 
-    async def ingest(self, file: UploadFile, source: str = None, **kwargs) -> dict:
+    async def ingest(self, file: UploadFile, source: str = None, chunk_size: int = None, chunk_overlap: int = None, **kwargs) -> dict:
         """Build Lexical Graph from file using ProjectGraphRAG pipeline."""
         if not source:
             source = file.filename
@@ -56,7 +56,8 @@ class GraphRAG(BaseRAG):
         try:
             with metrics.stage("load_documents"):
                 chunks = await self.thread_pool.run_in_executor(
-                    self.internal.load_and_chunk_file, file
+                    lambda f: self.internal.load_and_chunk_file(f, chunk_size=chunk_size, chunk_overlap=chunk_overlap),
+                    file
                 )
 
             if not chunks:
@@ -157,13 +158,14 @@ class GraphRAG(BaseRAG):
             if session_id:
                 with metrics.stage("memory_add_assistant"):
                     await self.memory_repo.add_message(
-                        session_id=session_id, role="assistant", content=answer
+                        session_id=session_id, role="assistant_graphrag", content=answer
                     )
 
             metrics.log_summary()
             log.info("GraphRAG query completed")
 
-            sources = self.internal.get_document_names(list(doc_ids))
+            doc_id_list = list(doc_ids)
+            sources = self.internal.collect_source_pages(hits, doc_id_list)
             return {"answer": answer, "sources": sources, "entities": entities}
 
         except Exception as e:
@@ -198,3 +200,11 @@ class GraphRAG(BaseRAG):
 
         doc_id = self.internal._uid(identifier)
         self.internal.delete_document(doc_id)
+
+    async def get_chat_history(self, session_id: str, **kwargs):
+        """Get GraphRAG chat history - chỉ lấy user + assistant_graphrag messages"""
+        return await self.memory_repo.get_history_all(session_id, role_filter="assistant_graphrag")
+
+    async def clear_history(self, session_id: str) -> int:
+        """Clear GraphRAG chat history for a session. Returns deleted count."""
+        return await self.memory_repo.delete_session_history(session_id)

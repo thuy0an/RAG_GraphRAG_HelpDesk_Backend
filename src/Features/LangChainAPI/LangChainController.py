@@ -145,7 +145,12 @@ class LangChainController:
                     child_chunk_size=child_chunk_size,
                     child_chunk_overlap=child_chunk_overlap,
                 )
-                graph_task = langfacade.GraphRAG.ingest(graph_file, file.filename)
+                graph_task = langfacade.GraphRAG.ingest(
+                    graph_file,
+                    file.filename,
+                    chunk_size=child_chunk_size,
+                    chunk_overlap=child_chunk_overlap,
+                )
 
                 pac_result, graph_result = await asyncio.gather(
                     pac_task, graph_task, return_exceptions=True
@@ -193,7 +198,7 @@ class LangChainController:
             langfacade: LangChainFacade = Depends(),
         ):
             pac_task = langfacade.PaCRAG.retrieve_full(req.query, session_id=req.session_id)
-            graph_task = langfacade.GraphRAG.retrieve_with_metrics(req.query, source=None)
+            graph_task = langfacade.GraphRAG.retrieve_with_metrics(req.query, source=None, session_id=req.session_id)
 
             pac_result, graph_result = await asyncio.gather(
                 pac_task, graph_task, return_exceptions=True
@@ -259,9 +264,18 @@ class LangChainController:
             req: RetrieveDocumentRequest, 
             langfacade: LangChainFacade = Depends()
         ):
+            async def generate():
+                async for chunk in langfacade.PaCRAG.retrieve(req.query, req.session_id):
+                    if chunk:
+                        yield chunk
+
             return StreamingResponse(
-                langfacade.PaCRAG.retrieve(req.query, req.session_id),
-                media_type="text/event-stream",
+                generate(),
+                media_type="text/plain; charset=utf-8",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "X-Accel-Buffering": "no",
+                },
             )
             ...
 
@@ -314,13 +328,14 @@ class LangChainController:
         class GraphQueryRequest(BaseModel):
             query: str
             source: Optional[str] = None
+            session_id: Optional[str] = None
 
         @self.router.post("/graph/query")
         async def query_graph(
             req: GraphQueryRequest,
             langfacade: LangChainFacade = Depends()
         ):
-            result = await langfacade.GraphRAG.retrieve(req.query, source=req.source)
+            result = await langfacade.GraphRAG.retrieve(req.query, source=req.source, session_id=req.session_id)
             return APIResponse(
                 message="Query completed", status_code=status.HTTP_200_OK, data=result
             )
@@ -335,6 +350,32 @@ class LangChainController:
                 message="Graph deleted successfully",
                 status_code=status.HTTP_200_OK,
                 data=None,
+            )
+
+        @self.router.get("/graph/history/{session_id}")
+        async def get_graph_history(
+            session_id: str,
+            langfacade: LangChainFacade = Depends()
+        ):
+            """Get GraphRAG chat history for a session"""
+            response = await langfacade.GraphRAG.get_chat_history(session_id=session_id)
+            return APIResponse(
+                message="GraphRAG chat history retrieved",
+                status_code=status.HTTP_200_OK,
+                data=response,
+            )
+
+        @self.router.delete("/graph/history/{session_id}")
+        async def clear_graph_history(
+            session_id: str,
+            langfacade: LangChainFacade = Depends()
+        ):
+            """Clear GraphRAG chat history for a session"""
+            deleted = await langfacade.GraphRAG.clear_history(session_id)
+            return APIResponse(
+                message="GraphRAG chat history cleared",
+                status_code=status.HTTP_200_OK,
+                data={"deleted": deleted},
             )
 
         @self.router.delete("/graph")

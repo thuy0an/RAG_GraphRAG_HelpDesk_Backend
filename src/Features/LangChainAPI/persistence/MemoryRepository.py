@@ -125,18 +125,37 @@ class MemoryRepository:
                 total_elements=total_elements
             )
 
-    async def get_history_all(self, session_id: str) -> List[Dict]:
-        """Get all conversation history for a session"""
+    async def get_history_all(self, session_id: str, role_filter: str = None) -> List[Dict]:
+        """Get all conversation history for a session, optionally filtered by assistant role.
+        
+        Args:
+            session_id: The session ID to fetch history for
+            role_filter: If provided (e.g. 'assistant_rag' or 'assistant_graphrag'), 
+                         returns only user messages + messages matching this role.
+                         If None, returns all messages.
+        """
         await self._ensure_initialized()
-        query = sa_text("""
-            SELECT ch.* 
-            FROM conversation_history ch
-            WHERE ch.session_id = :session_id
-            ORDER BY ch.timestamp ASC
-        """)
+
+        if role_filter:
+            query = sa_text("""
+                SELECT ch.* 
+                FROM conversation_history ch
+                WHERE ch.session_id = :session_id
+                AND (ch.role = 'user' OR ch.role = :role_filter)
+                ORDER BY ch.timestamp ASC
+            """)
+            params = {"session_id": session_id, "role_filter": role_filter}
+        else:
+            query = sa_text("""
+                SELECT ch.* 
+                FROM conversation_history ch
+                WHERE ch.session_id = :session_id
+                ORDER BY ch.timestamp ASC
+            """)
+            params = {"session_id": session_id}
 
         async with self.sqlite_engine.connect() as conn:
-            result = await conn.execute(query, {"session_id": session_id})
+            result = await conn.execute(query, params)
             return [dict(row) for row in result.mappings().all()]
 
     async def get_recent_messages(

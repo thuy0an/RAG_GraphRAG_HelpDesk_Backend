@@ -99,7 +99,7 @@ class PaCRAG(BaseRAG):
             if session_id:
                 with metrics.stage("memory_add_assistant"):
                     await self.memory_repo.add_message(
-                        session_id=session_id, role="assistant", content=answer
+                        session_id=session_id, role="assistant_rag", content=answer
                     )
             metrics.log_summary()
             yield answer
@@ -111,56 +111,21 @@ class PaCRAG(BaseRAG):
         metrics.increment("context_length", len(context))
 
         with metrics.stage("prompt_building"):
-            system_prompt = """
-            Bạn là trợ lý AI chuyên nghiệp
+            template = f"""Bạn là trợ lý AI chuyên nghiệp. Trả lời câu hỏi dựa trên ngữ cảnh bên dưới.
 
-            ## Quy tắc xử lý
+Ngữ cảnh:
+{context}
 
-            1. Trường hợp người dùng chỉ chào
-            Nếu người dùng chỉ gửi lời chào (ví dụ: "xin chào", "hello", "hi", ...):
+Câu hỏi: {query}
 
-            - Chỉ chào lại một cách lịch sự.
-            - **KHÔNG trả lời nội dung.**
-            - **KHÔNG sử dụng ngữ cảnh.**
-            - **KHÔNG hiển thị nguồn.**
+Hướng dẫn:
+- Nếu câu hỏi là lời chào: chỉ chào lại, không dùng ngữ cảnh.
+- Nếu là câu hỏi thực sự: trả lời đầy đủ dựa trên ngữ cảnh, sau đó thêm nguồn ở cuối theo định dạng:
+  - Nguồn: <tên file>
+  - Trang: <số trang>
+- Nếu không có thông tin: trả lời "Tôi không có thông tin về vấn đề này, vui lòng liên hệ bộ phận hỗ trợ."
 
-            2. Trong trường hợp người dùng gửi câu hỏi thì:
-            Hãy trả lời câu hỏi của người dùng dựa trên context
-
-            YÊU CẦU BẮT BUỘC:
-            1. Tuân theo quy tắc xử lý
-            2. Trả lời câu hỏi dựa trên ngữ cảnh
-            3. KẾT THÚC câu trả lời với 3 dòng thông tin nguồn:
-
-            Trong ngữ cảnh có metadata ở cuối mỗi tài liệu với định dạng:
-            Source: <tên file>, Page: <trang>
-
-            Hãy trích xuất thông tin từ metadata này và trình bày lại theo định dạng sau:
-
-            - Nguồn: <tên file>
-            - Trang: <không xác định nếu không có thông tin>
-
-            QUAN TRỌNG:
-            - Chỉ sử dụng thông tin từ metadata.
-            - Nếu không có thông tin trang thì ghi: "không xác định".
-            - Không sử dụng định dạng khác.
-
-            Ví dụ output:
-
-            - Nguồn: example.pdf
-            - Trang: không xác định
-            """
-
-            template = f"""{system_prompt}
-
-            Ngữ cảnh: {context}
-
-            Câu hỏi: {query}
-
-            Hãy trả lời câu hỏi dựa trên ngữ cảnh
-
-            Lưu ý nếu không tìm thấy thông tin thì output: tôi không có thông tin vui lòng liên hệ bộ phận hỗ trợ
-            """
+Trả lời:"""
             prompt = ChatPromptTemplate.from_template(template)
             chain = prompt | self.provider
 
@@ -177,7 +142,7 @@ class PaCRAG(BaseRAG):
         if session_id:
             with metrics.stage("memory_add_assistant"):
                 await self.memory_repo.add_message(
-                    session_id=session_id, role="assistant", content=answer
+                    session_id=session_id, role="assistant_rag", content=answer
                 )
 
         metrics.log_summary()
@@ -201,7 +166,7 @@ class PaCRAG(BaseRAG):
             if session_id:
                 with metrics.stage("memory_add_assistant"):
                     await self.memory_repo.add_message(
-                        session_id=session_id, role="assistant", content=answer
+                        session_id=session_id, role="assistant_rag", content=answer
                     )
             metrics.log_summary()
             total_time = time.perf_counter() - start
@@ -216,51 +181,21 @@ class PaCRAG(BaseRAG):
         metrics.increment("context_length", len(context))
 
         with metrics.stage("prompt_building"):
-            system_prompt = """
-            Bạn là trợ lý AI chuyên nghiệp
+            template = f"""Bạn là trợ lý AI chuyên nghiệp. Trả lời câu hỏi dựa trên ngữ cảnh bên dưới.
 
-            ## Quy tắc xử lý
+Ngữ cảnh:
+{context}
 
-            1. Trường hợp người dùng chỉ chào
-            Nếu người dùng chỉ gửi lời chào (ví dụ: "xin chào", "hello", "hi", ...):
+Câu hỏi: {query}
 
-            - Chỉ chào lại một cách lịch sự.
-            - **KHÔNG trả lời nội dung.**
-            - **KHÔNG sử dụng ngữ cảnh.**
-            - **KHÔNG hiển thị nguồn.**
+Hướng dẫn:
+- Nếu câu hỏi là lời chào: chỉ chào lại, không dùng ngữ cảnh.
+- Nếu là câu hỏi thực sự: trả lời đầy đủ dựa trên ngữ cảnh, sau đó thêm nguồn ở cuối theo định dạng:
+  - Nguồn: <tên file>
+  - Trang: <số trang>
+- Nếu không có thông tin: trả lời "Tôi không có thông tin về vấn đề này, vui lòng liên hệ bộ phận hỗ trợ."
 
-            2. Trong trường hợp người dùng gửi câu hỏi thì:
-            Hãy trả lời câu hỏi của người dùng dựa trên context
-
-            YÊU CẦU BẮT BUỘC:
-            1. Tuân theo quy tắc xử lý
-            2. Trả lời câu hỏi dựa trên ngữ cảnh
-            3. KẾT THÚC câu trả lời với 3 dòng thông tin nguồn:
-
-            Trong ngữ cảnh có metadata ở cuối mỗi tài liệu với định dạng:
-            Source: <tên file>, Page: <trang>
-
-            Hãy trích xuất thông tin từ metadata này và trình bày lại theo định dạng sau:
-
-            - Nguồn: <tên file>
-            - Trang: <không xác định nếu không có thông tin>
-
-            QUAN TRỌNG:
-            - Chỉ sử dụng thông tin từ metadata.
-            - Nếu không có thông tin trang thì ghi: "không xác định".
-            - Không sử dụng định dạng khác.
-            """
-
-            template = f"""{system_prompt}
-
-            Ngữ cảnh: {context}
-
-            Câu hỏi: {query}
-
-            Hãy trả lời câu hỏi dựa trên ngữ cảnh
-
-            Lưu ý nếu không tìm thấy thông tin thì output: tôi không có thông tin vui lòng liên hệ bộ phận hỗ trợ
-            """
+Trả lời:"""
             prompt = ChatPromptTemplate.from_template(template)
             chain = prompt | self.provider
 
@@ -271,7 +206,7 @@ class PaCRAG(BaseRAG):
         if session_id:
             with metrics.stage("memory_add_assistant"):
                 await self.memory_repo.add_message(
-                    session_id=session_id, role="assistant", content=answer
+                    session_id=session_id, role="assistant_rag", content=answer
                 )
 
         metrics.log_summary()
@@ -301,8 +236,8 @@ class PaCRAG(BaseRAG):
         return await self.memory_repo.delete_session_history(session_id)
 
     async def get_chat_history(self, session_id: str, **kwargs) -> List[Dict]:
-        """Get chat history for a session"""
-        return await self.memory_repo.get_history_all(session_id)
+        """Get chat history for a session - chỉ lấy user + assistant_rag messages"""
+        return await self.memory_repo.get_history_all(session_id, role_filter="assistant_rag")
 
     def _format_context_PaC(self, search_results: List[Dict[str, Any]]) -> str:
         """Format search results thành context string cho PaC"""

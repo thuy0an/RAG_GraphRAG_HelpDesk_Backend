@@ -71,6 +71,10 @@ class StorageService:
                 # Reset con trỏ file về đầu để index
                 await file.seek(0)
                 await self.langfacade.PaCRAG.index(file)
+            elif file_ext.lower() in (".doc", ".docx"):
+                # Index DOCX vào RAG
+                await file.seek(0)
+                await self.langfacade.PaCRAG.index(file)
 
             attachment.id = new_id
             attachment.file_name = filename
