@@ -1,8 +1,15 @@
 from datetime import datetime
 from sqlmodel import CHAR, TIMESTAMP, SQLModel, Field, text
 from sqlalchemy import Column, Index
-from typing import Optional
+from typing import List, Optional
+from pydantic import BaseModel
 import uuid6
+
+
+class RetrievedPassage(BaseModel):
+    content: str
+    filename: str
+    pages: List[int]
 
 
 class CompareRun(SQLModel, table=True):

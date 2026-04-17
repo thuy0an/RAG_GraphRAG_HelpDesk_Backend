@@ -1,3 +1,5 @@
+import logging
+import numpy as np
 from typing import List, Optional
 from pydantic import BaseModel
 from Features.LangChainAPI.LangChainFacade import LangChainFacade
@@ -12,6 +14,31 @@ from Features.LangChainAPI.LangChainDTO import ChatRequest
 from SharedKernel.persistence.Decorators import Controller
 from src.SharedKernel.base.APIResponse import APIResponse
 from src.Features.LangChainAPI.persistence.CompareRepository import CompareRepository
+
+log = logging.getLogger(__name__)
+
+
+def _compute_relevance_score(embedding_model, query: str, answer: str) -> Optional[float]:
+    """Tính cosine similarity giữa embedding của query và answer."""
+    try:
+        q_vec = np.array(embedding_model.embed_query(query))
+        a_vec = np.array(embedding_model.embed_query(answer))
+        norm = np.linalg.norm(q_vec) * np.linalg.norm(a_vec)
+        if norm == 0:
+            return None
+        cosine = float(np.dot(q_vec, a_vec) / norm)
+        return round(max(0.0, min(1.0, cosine)), 4)
+    except Exception as e:
+        log.error(f"Failed to compute relevance score: {e}")
+        return None
+
+
+def _compute_source_coverage(sources: list, retrieved_chunk_count: int) -> Optional[float]:
+    """Tính tỉ lệ unique sources / retrieved_chunk_count, clamped to [0.0, 1.0]."""
+    if not retrieved_chunk_count:
+        return None
+    unique_sources = len({s.get("filename", "") for s in sources if s.get("filename")})
+    return round(min(1.0, unique_sources / retrieved_chunk_count), 4)
 
 
 @Controller
@@ -94,6 +121,63 @@ class LangChainController:
                 message="Chat history cleared",
                 status_code=status.HTTP_200_OK,
                 data={"deleted": deleted},
+            )
+
+        class BeginTurnRequest(BaseModel):
+            session_id: str
+            user_content: str
+
+        @self.router.post("/begin_turn")
+        async def begin_turn(
+            req: BeginTurnRequest,
+            langfacade: LangChainFacade = Depends(),
+        ):
+            """
+            Tạo một turn mới trong conversation_history.
+            Trả về turn_id để frontend truyền cho cả PaCRAG và GraphRAG.
+            """
+            turn_id = await langfacade.PaCRAG.memory_repo.begin_turn(
+                session_id=req.session_id,
+                user_content=req.user_content,
+            )
+            return APIResponse(
+                message="Turn created",
+                status_code=status.HTTP_200_OK,
+                data={"turn_id": turn_id},
+            )
+
+        class SaveTurnRequest(BaseModel):
+            session_id: str
+            user_content: str
+            rag_content: Optional[str] = None
+            graphrag_content: Optional[str] = None
+
+        @self.router.post("/save_turn")
+        async def save_turn(
+            req: SaveTurnRequest,
+            langfacade: LangChainFacade = Depends(),
+        ):
+            """
+            Lưu 1 lượt hỏi-đáp hoàn chỉnh vào history.
+            Frontend gọi sau khi đã có đủ cả 2 kết quả RAG.
+            Đảm bảo chỉ 1 row duy nhất được tạo.
+            """
+            turn_id = await langfacade.PaCRAG.memory_repo.begin_turn(
+                session_id=req.session_id,
+                user_content=req.user_content,
+            )
+            if req.rag_content:
+                await langfacade.PaCRAG.memory_repo.update_rag(
+                    turn_id=turn_id, answer=req.rag_content
+                )
+            if req.graphrag_content:
+                await langfacade.PaCRAG.memory_repo.update_graphrag(
+                    turn_id=turn_id, answer=req.graphrag_content
+                )
+            return APIResponse(
+                message="Turn saved",
+                status_code=status.HTTP_200_OK,
+                data={"turn_id": turn_id},
             )
 
         @self.router.delete("/clear_vector_store")
@@ -197,8 +281,9 @@ class LangChainController:
             req: CompareQueryRequest,
             langfacade: LangChainFacade = Depends(),
         ):
-            pac_task = langfacade.PaCRAG.retrieve_full(req.query, session_id=req.session_id)
-            graph_task = langfacade.GraphRAG.retrieve_with_metrics(req.query, source=None, session_id=req.session_id)
+            # Chạy song song cả 2 RAG — không lưu history, frontend sẽ save sau
+            pac_task = langfacade.PaCRAG.retrieve_full(req.query)
+            graph_task = langfacade.GraphRAG.retrieve_with_metrics(req.query, source=None)
 
             pac_result, graph_result = await asyncio.gather(
                 pac_task, graph_task, return_exceptions=True
@@ -217,6 +302,22 @@ class LangChainController:
                 errors["graphrag"] = str(graph_result)
             else:
                 graph_metrics = graph_result
+
+            if pac_metrics is not None:
+                pac_answer = pac_metrics.get("answer", "")
+                pac_metrics["relevance_score"] = _compute_relevance_score(langfacade.embedding, req.query, pac_answer)
+                pac_metrics["source_coverage"] = _compute_source_coverage(
+                    pac_metrics.get("retrieved_chunks", []),
+                    pac_metrics.get("retrieved_chunk_count", 0)
+                )
+
+            if graph_metrics is not None:
+                graph_answer = graph_metrics.get("answer", "")
+                graph_metrics["relevance_score"] = _compute_relevance_score(langfacade.embedding, req.query, graph_answer)
+                graph_metrics["source_coverage"] = _compute_source_coverage(
+                    graph_metrics.get("sources", []),
+                    graph_metrics.get("retrieved_chunk_count", 0)
+                )
 
             run = await compare_repo.update_query_metrics(
                 req.run_id,
@@ -258,14 +359,21 @@ class LangChainController:
         class RetrieveDocumentRequest(BaseModel):
             query: str
             session_id: str
+            turn_id: Optional[str] = None
+            save_history: bool = True
 
         @self.router.post("/retrieve_document")
         async def retrieve_document(
-            req: RetrieveDocumentRequest, 
+            req: RetrieveDocumentRequest,
             langfacade: LangChainFacade = Depends()
         ):
             async def generate():
-                async for chunk in langfacade.PaCRAG.retrieve(req.query, req.session_id):
+                async for chunk in langfacade.PaCRAG.retrieve(
+                    req.query,
+                    session_id=req.session_id,
+                    turn_id=req.turn_id,
+                    save_user_message=req.save_history,
+                ):
                     if chunk:
                         yield chunk
 
@@ -329,13 +437,21 @@ class LangChainController:
             query: str
             source: Optional[str] = None
             session_id: Optional[str] = None
+            turn_id: Optional[str] = None
+            save_history: bool = True
 
         @self.router.post("/graph/query")
         async def query_graph(
             req: GraphQueryRequest,
             langfacade: LangChainFacade = Depends()
         ):
-            result = await langfacade.GraphRAG.retrieve(req.query, source=req.source, session_id=req.session_id)
+            result = await langfacade.GraphRAG.retrieve(
+                req.query,
+                source=req.source,
+                session_id=req.session_id,
+                turn_id=req.turn_id,
+                save_user_message=req.save_history,
+            )
             return APIResponse(
                 message="Query completed", status_code=status.HTTP_200_OK, data=result
             )

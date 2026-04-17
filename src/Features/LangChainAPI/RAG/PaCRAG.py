@@ -9,6 +9,7 @@ from SharedKernel.base.Metrics import Metrics
 from Features.LangChainAPI.RAG.BaseRAG import BaseRAG
 from Features.LangChainAPI.persistence.RedisVSRepository import RedisVSRepository
 from SharedKernel.config.LLMConfig import EmbeddingFactory
+from Features.LangChainAPI.prompt import PaC_template, PaC_template_with_history, format_history_block
 
 log = logging.getLogger(__name__)
 
@@ -78,16 +79,26 @@ class PaCRAG(BaseRAG):
         self,
         query: str,
         session_id: str = None,
+        turn_id: str = None,
+        save_user_message: bool = True,
         **kwargs
     ) -> AsyncGenerator[str, None]:
-        """Retrieve documents và generate response với streaming"""
+        """Retrieve documents và generate response với streaming. Không tự lưu history."""
         metrics = Metrics("Retriever")
 
-        if session_id:
-            with metrics.stage("memory_add_user"):
-                await self.memory_repo.add_message(
-                    session_id=session_id, role="user", content=query
-                )
+        # Lấy conversation history để inject vào prompt (1 lần duy nhất)
+        history_block = ""
+        limit = self._get_history_limit()
+        if session_id and limit > 0:
+            try:
+                turns = await self.memory_repo.get_recent_messages(session_id, limit=limit)
+                history_block = format_history_block(turns, role_key="rag_content")
+                log.debug(f"Injecting {len(turns)} conversation turns for session {session_id}")
+            except Exception as e:
+                log.warning(f"Failed to get history for session {session_id}: {e}")
+                history_block = ""
+        elif limit == 0:
+            log.debug("Conversation history disabled (limit=0)")
 
         with metrics.stage("hybrid_retrieval"):
             hybrid_docs = await self.redis_vs_repo.hybrid_retriver(query=query, k=5)
@@ -96,11 +107,6 @@ class PaCRAG(BaseRAG):
 
         if not hybrid_docs:
             answer = "Không tìm thấy tài liệu liên quan. Vui lòng upload tài liệu trước hoặc đặt câu hỏi cụ thể hơn."
-            if session_id:
-                with metrics.stage("memory_add_assistant"):
-                    await self.memory_repo.add_message(
-                        session_id=session_id, role="assistant_rag", content=answer
-                    )
             metrics.log_summary()
             yield answer
             return
@@ -111,21 +117,7 @@ class PaCRAG(BaseRAG):
         metrics.increment("context_length", len(context))
 
         with metrics.stage("prompt_building"):
-            template = f"""Bạn là trợ lý AI chuyên nghiệp. Trả lời câu hỏi dựa trên ngữ cảnh bên dưới.
-
-Ngữ cảnh:
-{context}
-
-Câu hỏi: {query}
-
-Hướng dẫn:
-- Nếu câu hỏi là lời chào: chỉ chào lại, không dùng ngữ cảnh.
-- Nếu là câu hỏi thực sự: trả lời đầy đủ dựa trên ngữ cảnh, sau đó thêm nguồn ở cuối theo định dạng:
-  - Nguồn: <tên file>
-  - Trang: <số trang>
-- Nếu không có thông tin: trả lời "Tôi không có thông tin về vấn đề này, vui lòng liên hệ bộ phận hỗ trợ."
-
-Trả lời:"""
+            template = PaC_template_with_history(context, history_block)
             prompt = ChatPromptTemplate.from_template(template)
             chain = prompt | self.provider
 
@@ -136,26 +128,18 @@ Trả lời:"""
                     answer_parts.append(chunk.content)
                     yield chunk.content
         metrics.increment("answer_tokens", len("".join(answer_parts).split()))
-
-        answer = "".join(answer_parts)
-
-        if session_id:
-            with metrics.stage("memory_add_assistant"):
-                await self.memory_repo.add_message(
-                    session_id=session_id, role="assistant_rag", content=answer
-                )
-
         metrics.log_summary()
 
-    async def retrieve_full(self, query: str, session_id: str = None) -> Dict[str, Any]:
+    async def retrieve_full(
+        self,
+        query: str,
+        session_id: str = None,
+        turn_id: str = None,
+        save_user_message: bool = True
+    ) -> Dict[str, Any]:
+        """Non-streaming version. Không tự lưu history."""
         metrics = Metrics("RetrieverFull")
         start = time.perf_counter()
-
-        if session_id:
-            with metrics.stage("memory_add_user"):
-                await self.memory_repo.add_message(
-                    session_id=session_id, role="user", content=query
-                )
 
         with metrics.stage("hybrid_retrieval"):
             hybrid_docs = await self.redis_vs_repo.hybrid_retriver(query=query, k=5)
@@ -163,17 +147,15 @@ Trả lời:"""
 
         if not hybrid_docs:
             answer = "Không tìm thấy tài liệu liên quan. Vui lòng upload tài liệu trước hoặc đặt câu hỏi cụ thể hơn."
-            if session_id:
-                with metrics.stage("memory_add_assistant"):
-                    await self.memory_repo.add_message(
-                        session_id=session_id, role="assistant_rag", content=answer
-                    )
             metrics.log_summary()
             total_time = time.perf_counter() - start
             return {
                 "answer": answer,
                 "time_total_s": round(total_time, 2),
                 "answer_tokens": len(answer.split()),
+                "word_count": 0,
+                "retrieved_chunk_count": 0,
+                "retrieved_chunks": [],
             }
 
         with metrics.stage("context_formatting"):
@@ -181,21 +163,7 @@ Trả lời:"""
         metrics.increment("context_length", len(context))
 
         with metrics.stage("prompt_building"):
-            template = f"""Bạn là trợ lý AI chuyên nghiệp. Trả lời câu hỏi dựa trên ngữ cảnh bên dưới.
-
-Ngữ cảnh:
-{context}
-
-Câu hỏi: {query}
-
-Hướng dẫn:
-- Nếu câu hỏi là lời chào: chỉ chào lại, không dùng ngữ cảnh.
-- Nếu là câu hỏi thực sự: trả lời đầy đủ dựa trên ngữ cảnh, sau đó thêm nguồn ở cuối theo định dạng:
-  - Nguồn: <tên file>
-  - Trang: <số trang>
-- Nếu không có thông tin: trả lời "Tôi không có thông tin về vấn đề này, vui lòng liên hệ bộ phận hỗ trợ."
-
-Trả lời:"""
+            template = PaC_template(context)
             prompt = ChatPromptTemplate.from_template(template)
             chain = prompt | self.provider
 
@@ -203,21 +171,28 @@ Trả lời:"""
             response = chain.invoke({"query": query})
             answer = response.content if hasattr(response, "content") else str(response)
 
-        if session_id:
-            with metrics.stage("memory_add_assistant"):
-                await self.memory_repo.add_message(
-                    session_id=session_id, role="assistant_rag", content=answer
-                )
+        # Trích xuất retrieved_chunks (tối đa 10)
+        retrieved_chunks = []
+        for doc in hybrid_docs[:10]:
+            metadata = doc.get("metadata", {})
+            pages = metadata.get("pages") or []
+            if not pages and metadata.get("page_number"):
+                pages = [metadata["page_number"]]
+            retrieved_chunks.append({
+                "content": doc.get("content", ""),
+                "filename": metadata.get("source", ""),
+                "pages": pages,
+            })
 
         metrics.log_summary()
-
         total_time = time.perf_counter() - start
-        token_count = len(answer.split())
-
         return {
             "answer": answer,
             "time_total_s": round(total_time, 2),
-            "answer_tokens": token_count,
+            "answer_tokens": len(answer.split()),
+            "word_count": len(answer.split()),
+            "retrieved_chunk_count": len(hybrid_docs),
+            "retrieved_chunks": retrieved_chunks,
         }
 
     async def delete(self, identifier: str, **kwargs) -> None:

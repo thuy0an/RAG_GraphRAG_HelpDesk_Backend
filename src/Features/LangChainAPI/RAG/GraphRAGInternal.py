@@ -20,60 +20,62 @@ log = logging.getLogger(__name__)
 
 
 class GraphRAGInternal:
-    _SECTION_EXTRACT_PROMPT = """Analyze the following text and return a JSON object with:
-1. "title": short section title (max 8 words)
-2. "summary": concise summary (2-3 sentences)
-3. "entities": list of entities with name and type
-4. "relations": list of [subject, relation, object] triples
+    _SECTION_EXTRACT_PROMPT = """Phân tích đoạn văn bản sau và trả về một JSON object với các trường:
+1. "title": tiêu đề ngắn của đoạn (tối đa 8 từ)
+2. "summary": tóm tắt ngắn gọn (2-3 câu)
+3. "entities": danh sách các thực thể với tên và loại
+4. "relations": danh sách các bộ ba [chủ thể, quan hệ, đối tượng]
 
-Entity types: PERSON, ORG, CONCEPT, SKILL, PLACE, OTHER
-Normalize entity names to lowercase.
+Loại thực thể: PERSON, ORG, CONCEPT, SKILL, PLACE, OTHER
+Chuẩn hóa tên thực thể về chữ thường.
 
-Return ONLY valid JSON:
+Chỉ trả về JSON hợp lệ:
 {{
     "title": "...",
     "summary": "...",
     "entities": [{{"name": "...", "type": "..."}}],
-    "relations": [["subject", "relation", "object"]]
+    "relations": [["chủ thể", "quan hệ", "đối tượng"]]
 }}
 
-Text:
+Văn bản:
 {text}
 
 JSON:"""
 
-    _DOC_SUMMARY_PROMPT = """Summarize the following document in 3-5 sentences.
-Focus on the main topics, key entities, and overall purpose.
+    _DOC_SUMMARY_PROMPT = """Tóm tắt tài liệu sau trong 3-5 câu bằng tiếng Việt.
+Tập trung vào các chủ đề chính, thực thể quan trọng và mục đích tổng thể của tài liệu.
 
-Document sections:
+Các đoạn của tài liệu:
 {sections}
 
-Summary:"""
+Tóm tắt:"""
 
-    _ENTITY_EXTRACT_PROMPT = """List the key entities (people, organizations, concepts, skills, places) in this question.
-Return ONLY a JSON array, e.g. ["entity1", "entity2"]. If none, return [].
+    _ENTITY_EXTRACT_PROMPT = """Liệt kê các thực thể chính (người, tổ chức, khái niệm, kỹ năng, địa điểm) trong câu hỏi sau.
+Chỉ trả về một JSON array, ví dụ: ["thực thể 1", "thực thể 2"]. Nếu không có, trả về [].
 
-Question: {question}
-Entities:"""
+Câu hỏi: {question}
+Thực thể:"""
 
-    _ANSWER_PROMPT = """You are a helpful assistant. Answer the question using the context below.
-If the answer is not in the context, say "I don't have enough information."
+    _ANSWER_PROMPT = """Bạn là trợ lý AI chuyên nghiệp. Hãy trả lời câu hỏi bằng tiếng Việt dựa trên ngữ cảnh bên dưới.
+Nếu câu hỏi được đặt bằng tiếng Anh, hãy trả lời bằng tiếng Anh.
+Nếu không tìm thấy thông tin trong ngữ cảnh, hãy trả lời: "Tôi không có đủ thông tin về vấn đề này, vui lòng liên hệ bộ phận hỗ trợ."
+Không sử dụng bất kỳ ngôn ngữ nào khác ngoài tiếng Việt hoặc tiếng Anh.
 
-=== Document Overview ===
+=== Tổng quan tài liệu ===
 {doc_summary}
 
-=== Section Summaries (hierarchical context) ===
+=== Tóm tắt các đoạn (ngữ cảnh phân cấp) ===
 {section_context}
 
-=== Knowledge Graph (entity relationships) ===
+=== Đồ thị tri thức (quan hệ thực thể) ===
 {graph_context}
 
-=== Retrieved Passages ===
+=== Đoạn văn bản liên quan ===
 {doc_context}
 
-Question: {question}
+{history_section}Câu hỏi: {question}
 
-Answer:"""
+Trả lời:"""
 
     def __init__(
         self,
@@ -548,11 +550,21 @@ Answer:"""
             "entities": entities[0].get("count", 0) if entities else 0,
         }
 
-    def collect_context(self, hits: List[Dict]) -> tuple[List[str], set, set]:
+    def collect_context(self, hits: List[Dict]) -> tuple[List[dict], set, set]:
         seen_chunks = set()
         doc_passages = []
         section_ids = set()
         doc_ids = set()
+
+        # Collect all doc_ids first to batch-lookup filenames
+        for hit in hits:
+            if hit.get("doc_id"):
+                doc_ids.add(hit["doc_id"])
+
+        # Batch lookup filenames from Neo4j
+        doc_id_list = list(doc_ids)
+        doc_names = self.get_document_names(doc_id_list) if doc_id_list else []
+        id_to_filename = {doc_id_list[i]: doc_names[i] for i in range(len(doc_id_list))}
 
         for hit in hits:
             chunk_id = hit.get("chunk_id") or hit.get("id")
@@ -561,11 +573,16 @@ Answer:"""
             seen_chunks.add(chunk_id)
             text = hit.get("text") or hit.get("content", "")
             if text:
-                doc_passages.append(text)
+                page_number = hit.get("page_number")
+                # Resolve filename: prefer hit's own filename, fallback to doc lookup
+                filename = hit.get("filename") or id_to_filename.get(hit.get("doc_id", ""), "")
+                doc_passages.append({
+                    "content": text,
+                    "filename": filename,
+                    "pages": [page_number] if page_number is not None else [],
+                })
             if hit.get("section_id"):
                 section_ids.add(hit["section_id"])
-            if hit.get("doc_id"):
-                doc_ids.add(hit["doc_id"])
 
         return doc_passages, section_ids, doc_ids
 
@@ -659,14 +676,37 @@ Answer:"""
         doc_summary_parts: List[str],
         section_summaries: List[str],
         graph_facts: List[str],
-        doc_passages: List[str],
+        doc_passages: List[dict],
         question: str,
+        history_block: str = "",
     ) -> str:
+        """
+        Build prompt cho GraphRAG.
+
+        Args:
+            doc_passages: List[dict] với mỗi dict chứa 'content', 'filename', 'pages'.
+            history_block: ConversationHistory_Block từ format_history_block().
+                           Default="" để backward compatible với code hiện tại.
+        """
+        # Escape curly braces trong history_block để tránh lỗi str.format()
+        safe_history = history_block.replace("{", "{{").replace("}", "}}")
+
+        if safe_history.strip():
+            history_section = (
+                f"=== Lịch sử hội thoại ===\n{safe_history}\n=== Kết thúc lịch sử ===\n\n"
+            )
+        else:
+            history_section = ""
+
+        # Extract text content from each passage dict
+        passage_texts = [p["content"] for p in doc_passages if isinstance(p, dict) and p.get("content")]
+
         return self._ANSWER_PROMPT.format(
             doc_summary="\n\n".join(doc_summary_parts) or "N/A",
             section_context="\n".join(section_summaries) or "N/A",
             graph_context="\n".join(graph_facts) or "No graph context found.",
-            doc_context="\n\n---\n\n".join(doc_passages),
+            doc_context="\n\n---\n\n".join(passage_texts),
+            history_section=history_section,
             question=question,
         )
 

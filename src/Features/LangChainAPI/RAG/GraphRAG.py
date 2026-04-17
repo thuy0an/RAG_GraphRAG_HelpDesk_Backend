@@ -11,6 +11,7 @@ from src.SharedKernel.utils.yamlenv import load_env_yaml
 from src.Features.LangChainAPI.RAG.BaseRAG import BaseRAG
 from src.Features.LangChainAPI.persistence.Neo4JStore import Neo4JStore
 from src.Features.LangChainAPI.RAG.GraphRAGInternal import GraphRAGInternal
+from src.Features.LangChainAPI.prompt import format_history_block
 from SharedKernel.threading.ThreadPoolManager import ThreadPoolManager
 
 log = logging.getLogger(__name__)
@@ -98,18 +99,28 @@ class GraphRAG(BaseRAG):
         query: str,
         session_id: str = None,
         source: str = None,
+        turn_id: str = None,
+        save_user_message: bool = True,
         **kwargs
     ) -> dict:
-        """Graph RAG query pipeline using ProjectGraphRAG query chain."""
+        """Graph RAG query pipeline. Không tự lưu history."""
         metrics = Metrics("GraphRAGQuery")
         log.info(f"Starting GraphRAG query: {query}")
 
         try:
-            if session_id:
-                with metrics.stage("memory_add_user"):
-                    await self.memory_repo.add_message(
-                        session_id=session_id, role="user", content=query
-                    )
+            # Lấy conversation history để inject vào prompt
+            history_block = ""
+            limit = self._get_history_limit()
+            if session_id and limit > 0:
+                try:
+                    turns = await self.memory_repo.get_recent_messages(session_id, limit=limit)
+                    history_block = format_history_block(turns, role_key="graphrag_content")
+                    log.debug(f"Injecting {len(turns)} conversation turns for session {session_id}")
+                except Exception as e:
+                    log.warning(f"Failed to get history for session {session_id}: {e}")
+                    history_block = ""
+            elif limit == 0:
+                log.debug("Conversation history disabled (limit=0)")
 
             with metrics.stage("embed_query"):
                 query_embedding = self.embedding.embed_query(query)
@@ -151,22 +162,23 @@ class GraphRAG(BaseRAG):
                     graph_facts,
                     doc_passages,
                     query,
+                    history_block=history_block,
                 )
                 response = self.provider.invoke(prompt)
                 answer = response.content.strip()
-
-            if session_id:
-                with metrics.stage("memory_add_assistant"):
-                    await self.memory_repo.add_message(
-                        session_id=session_id, role="assistant_graphrag", content=answer
-                    )
 
             metrics.log_summary()
             log.info("GraphRAG query completed")
 
             doc_id_list = list(doc_ids)
             sources = self.internal.collect_source_pages(hits, doc_id_list)
-            return {"answer": answer, "sources": sources, "entities": entities}
+            return {
+                "answer": answer,
+                "sources": sources,
+                "entities": entities,
+                "retrieved_chunk_count": len(hits),
+                "doc_passages": doc_passages[:10],
+            }
 
         except Exception as e:
             log.error(f"GraphRAG query failed: {str(e)}")
@@ -179,10 +191,12 @@ class GraphRAG(BaseRAG):
         query: str,
         session_id: str = None,
         source: str = None,
+        turn_id: str = None,
+        save_user_message: bool = True,
         **kwargs
     ) -> dict:
         start = time.perf_counter()
-        result = await self.retrieve(query, session_id=session_id, source=source, **kwargs)
+        result = await self.retrieve(query, source=source, **kwargs)
         total_time = time.perf_counter() - start
         answer = result.get("answer", "")
         return {
@@ -191,6 +205,9 @@ class GraphRAG(BaseRAG):
             "entities": result.get("entities", []),
             "time_total_s": round(total_time, 2),
             "answer_tokens": len(answer.split()),
+            "word_count": len(answer.split()),
+            "retrieved_chunk_count": result.get("retrieved_chunk_count", 0),
+            "doc_passages": result.get("doc_passages", []),
         }
 
     async def delete(self, identifier: str, **kwargs) -> None:

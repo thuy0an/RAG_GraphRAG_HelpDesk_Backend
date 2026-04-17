@@ -166,6 +166,19 @@ class CompareRepository:
             result = await conn.execute(query, {"run_id": run_id})
             return result.rowcount
 
+    def _deserialize_query_json(self, raw: Optional[str]) -> Optional[dict]:
+        """Deserialize query JSON với backward compatibility cho các trường mới."""
+        if not raw:
+            return None
+        data = json.loads(raw)
+        # Backward compatibility: đảm bảo các trường mới có giá trị mặc định
+        data.setdefault("relevance_score", None)
+        data.setdefault("source_coverage", None)
+        data.setdefault("word_count", None)
+        data.setdefault("doc_passages", [])
+        data.setdefault("retrieved_chunks", [])
+        return data
+
     def _serialize_run(self, run: CompareRun) -> Dict:
         return {
             "id": run.id,
@@ -175,8 +188,8 @@ class CompareRepository:
             "file_size": run.file_size,
             "pac_ingest": json.loads(run.pac_ingest_json or "{}"),
             "graphrag_ingest": json.loads(run.graphrag_ingest_json or "{}"),
-            "pac_query": json.loads(run.pac_query_json or "{}") if run.pac_query_json else None,
-            "graphrag_query": json.loads(run.graphrag_query_json or "{}") if run.graphrag_query_json else None,
+            "pac_query": self._deserialize_query_json(run.pac_query_json),
+            "graphrag_query": self._deserialize_query_json(run.graphrag_query_json),
             "errors": json.loads(run.errors_json or "{}") if run.errors_json else None,
             "created_at": run.created_at.isoformat() if run.created_at else None,
         }
@@ -198,8 +211,8 @@ class CompareRepository:
             "file_size": row.get("file_size"),
             "pac_ingest": json.loads(row.get("pac_ingest_json") or "{}"),
             "graphrag_ingest": json.loads(row.get("graphrag_ingest_json") or "{}"),
-            "pac_query": json.loads(row.get("pac_query_json") or "{}") if row.get("pac_query_json") else None,
-            "graphrag_query": json.loads(row.get("graphrag_query_json") or "{}") if row.get("graphrag_query_json") else None,
+            "pac_query": self._deserialize_query_json(row.get("pac_query_json")),
+            "graphrag_query": self._deserialize_query_json(row.get("graphrag_query_json")),
             "errors": json.loads(row.get("errors_json") or "{}") if row.get("errors_json") else None,
             "created_at": created_at_value,
         }
