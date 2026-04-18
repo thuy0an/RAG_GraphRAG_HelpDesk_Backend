@@ -286,9 +286,11 @@ class LangChainController:
         ):
             # Chạy song song cả 2 RAG — không lưu history, frontend sẽ save sau
             pac_task = langfacade.PaCRAG.retrieve_full(req.query, enable_reranking=req.reranking_enabled, source_filter=req.source_filter, source_filters=req.source_filters)
-            # GraphRAG: nếu có nhiều file → dùng file đầu tiên (GraphRAG chỉ hỗ trợ 1 source)
-            graph_source = req.source_filter or (req.source_filters[0] if req.source_filters else None)
-            graph_task = langfacade.GraphRAG.retrieve_with_metrics(req.query, source=graph_source)
+            graph_task = langfacade.GraphRAG.retrieve_with_metrics(
+                req.query,
+                source=req.source_filter,
+                source_filters=req.source_filters,
+            )
 
             pac_result, graph_result = await asyncio.gather(
                 pac_task, graph_task, return_exceptions=True
@@ -335,12 +337,20 @@ class LangChainController:
                         graph_metrics["reranking_scores"] = rr_scores
                         graph_metrics["reranking_time_s"] = rr_time
 
-            run = await compare_repo.update_query_metrics(
+            run = await compare_repo.create_query_run(
                 req.run_id,
                 pac_query=pac_metrics,
                 graphrag_query=graph_metrics,
                 query_text=req.query,
             )
+
+            if run is None:
+                run = await compare_repo.update_query_metrics(
+                    req.run_id,
+                    pac_query=pac_metrics,
+                    graphrag_query=graph_metrics,
+                    query_text=req.query,
+                )
 
             return APIResponse(
                 message="Comparison query completed",
@@ -457,6 +467,7 @@ class LangChainController:
         class GraphQueryRequest(BaseModel):
             query: str
             source: Optional[str] = None
+            source_filters: Optional[List[str]] = None
             session_id: Optional[str] = None
             turn_id: Optional[str] = None
             save_history: bool = True
@@ -469,6 +480,7 @@ class LangChainController:
             result = await langfacade.GraphRAG.retrieve(
                 req.query,
                 source=req.source,
+                source_filters=req.source_filters,
                 session_id=req.session_id,
                 turn_id=req.turn_id,
                 save_user_message=req.save_history,
@@ -480,6 +492,7 @@ class LangChainController:
         class GraphMultiHopRequest(BaseModel):
             query: str
             source: Optional[str] = None
+            source_filters: Optional[List[str]] = None
             max_hops: int = 2
 
         @self.router.post("/graph/multi-hop-query")
@@ -490,6 +503,8 @@ class LangChainController:
             result = await langfacade.GraphRAG.multi_hop_retrieve(
                 req.query,
                 max_hops=req.max_hops,
+                source=req.source,
+                source_filters=req.source_filters,
             )
             return APIResponse(
                 message="Multi-hop query completed",

@@ -100,6 +100,7 @@ class GraphRAG(BaseRAG):
         query: str,
         session_id: str = None,
         source: str = None,
+        source_filters: List[str] | None = None,
         turn_id: str = None,
         save_user_message: bool = True,
         **kwargs
@@ -126,7 +127,12 @@ class GraphRAG(BaseRAG):
             with metrics.stage("embed_query"):
                 query_embedding = self.embedding.embed_query(query)
 
-            doc_ids = [self.internal._uid(source)] if source else None
+            doc_ids = None
+            if source_filters:
+                doc_ids = [self.internal._uid(s) for s in source_filters if s]
+                doc_ids = list(dict.fromkeys(doc_ids)) or None
+            elif source:
+                doc_ids = [self.internal._uid(source)]
             with metrics.stage("vector_search"):
                 hits = self.internal.vector_search_chunks(
                     query_embedding, k=self.internal.top_k, doc_ids=doc_ids
@@ -135,13 +141,35 @@ class GraphRAG(BaseRAG):
             if not hits:
                 metrics.increment("empty_hits", 1)
                 metrics.log_summary()
+                # Kiểm tra xem có document nào trong Neo4j không
+                chunk_label = self.internal._label("Chunk")
+                try:
+                    count_result = self.neo4j_store.execute_query(
+                        f"MATCH (c:{chunk_label}) RETURN COUNT(c) AS cnt"
+                    )
+                    chunk_count = count_result[0].get("cnt", 0) if count_result else 0
+                except Exception:
+                    chunk_count = 0
+
+                if chunk_count == 0:
+                    answer = "Chưa có tài liệu nào được upload vào GraphRAG. Vui lòng upload tài liệu trước."
+                else:
+                    answer = f"Không tìm thấy thông tin liên quan đến câu hỏi này trong {chunk_count} chunks đã lưu. Thử đặt câu hỏi theo cách khác hoặc upload thêm tài liệu liên quan."
                 return {
-                    "answer": "Chưa có dữ liệu GraphRAG. Vui lòng upload tài liệu trước.",
+                    "answer": answer,
                     "sources": [],
                     "entities": [],
                 }
 
             doc_passages, section_ids, doc_ids = self.internal.collect_context(hits)
+            if not doc_passages:
+                metrics.increment("empty_context", 1)
+                metrics.log_summary()
+                return {
+                    "answer": "Không tìm thấy thông tin liên quan trong dữ liệu đã lưu. Thử đặt câu hỏi khác hoặc upload thêm tài liệu liên quan.",
+                    "sources": [],
+                    "entities": [],
+                }
 
             with metrics.stage("extract_entities"):
                 entities = self.internal.extract_query_entities(query)
@@ -173,6 +201,8 @@ class GraphRAG(BaseRAG):
 
             doc_id_list = list(doc_ids)
             sources = self.internal.collect_source_pages(hits, doc_id_list)
+            if not sources and doc_passages:
+                sources = self.internal.collect_sources_from_passages(doc_passages)
             return {
                 "answer": answer,
                 "sources": sources,
@@ -192,12 +222,13 @@ class GraphRAG(BaseRAG):
         query: str,
         session_id: str = None,
         source: str = None,
+        source_filters: List[str] | None = None,
         turn_id: str = None,
         save_user_message: bool = True,
         **kwargs
     ) -> dict:
         start = time.perf_counter()
-        result = await self.retrieve(query, source=source, **kwargs)
+        result = await self.retrieve(query, source=source, source_filters=source_filters, **kwargs)
         total_time = time.perf_counter() - start
         answer = result.get("answer", "")
 
@@ -238,7 +269,13 @@ class GraphRAG(BaseRAG):
         """Clear GraphRAG chat history for a session. Returns deleted count."""
         return await self.memory_repo.delete_session_history(session_id)
 
-    async def multi_hop_retrieve(self, query: str, max_hops: int = 2) -> dict:
+    async def multi_hop_retrieve(
+        self,
+        query: str,
+        max_hops: int = 2,
+        source: str = None,
+        source_filters: List[str] | None = None,
+    ) -> dict:
         """Multi-hop reasoning: retrieve in multiple hops, merging context."""
         import time
         start = time.perf_counter()
@@ -259,7 +296,7 @@ class GraphRAG(BaseRAG):
             return added
 
         # Hop 1: retrieve with original query
-        result_hop1 = await self.retrieve(query)
+        result_hop1 = await self.retrieve(query, source=source, source_filters=source_filters)
         hop_count = 1
         entities_hop1 = result_hop1.get("entities", [])
         _merge_passages(result_hop1.get("doc_passages", []))
@@ -267,7 +304,7 @@ class GraphRAG(BaseRAG):
         # Hop 2: use entities from hop 1 as sub-query
         if max_hops >= 2 and entities_hop1:
             hop2_query = " ".join(entities_hop1[:5])
-            result_hop2 = await self.retrieve(hop2_query)
+            result_hop2 = await self.retrieve(hop2_query, source=source, source_filters=source_filters)
             new_added = _merge_passages(result_hop2.get("doc_passages", []))
             if new_added > 0:
                 hop_count = 2

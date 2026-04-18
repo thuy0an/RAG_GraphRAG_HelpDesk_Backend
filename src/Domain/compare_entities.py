@@ -28,5 +28,6 @@ class CompareRun(SQLModel, table=True):
     graphrag_ingest_json: str = Field()
     pac_query_json: Optional[str] = Field(default=None)
     graphrag_query_json: Optional[str] = Field(default=None)
+    query_text: Optional[str] = Field(default=None)
     errors_json: Optional[str] = Field(default=None)
     created_at: Optional[datetime] = Field(default=None, sa_column=Column("created_at", TIMESTAMP, server_default=text("(now())")))

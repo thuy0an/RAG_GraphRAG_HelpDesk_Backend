@@ -104,11 +104,7 @@ class CompareRepository:
         await self._ensure_initialized()
 
         # Add query_text column if not exists (migration)
-        try:
-            async with self.sqlite_engine.begin() as conn:
-                await conn.execute(sa_text("ALTER TABLE compare_runs ADD COLUMN query_text TEXT"))
-        except Exception:
-            pass  # Column already exists
+        await self._ensure_query_text_column()
 
         query = sa_text(
             """
@@ -128,6 +124,58 @@ class CompareRepository:
                     "pac_query": json.dumps(pac_query or {}),
                     "graphrag_query": json.dumps(graphrag_query or {}),
                     "query_text": query_text,
+                },
+            )
+
+        return await self.get_run(run_id)
+
+    async def create_query_run(
+        self,
+        base_run_id: str,
+        pac_query: Optional[Dict],
+        graphrag_query: Optional[Dict],
+        query_text: Optional[str],
+    ) -> Optional[Dict]:
+        """Create a new compare run for each query to avoid overwriting history."""
+        await self._ensure_initialized()
+        await self._ensure_query_text_column()
+
+        base_run = await self.get_run(base_run_id)
+        if not base_run:
+            return None
+
+        run_id = str(uuid6.uuid7())
+        created_at = datetime.now(_VN_TZ).strftime("%Y-%m-%d %H:%M:%S")
+
+        query = sa_text(
+            """
+            INSERT INTO compare_runs
+            (id, session_id, file_name, file_type, file_size,
+             pac_ingest_json, graphrag_ingest_json, errors_json,
+             pac_query_json, graphrag_query_json, query_text, created_at)
+            VALUES
+            (:id, :session_id, :file_name, :file_type, :file_size,
+             :pac_ingest, :graphrag_ingest, :errors_json,
+             :pac_query, :graphrag_query, :query_text, :created_at)
+            """
+        )
+
+        async with self.sqlite_engine.begin() as conn:
+            await conn.execute(
+                query,
+                {
+                    "id": run_id,
+                    "session_id": base_run.get("session_id"),
+                    "file_name": base_run.get("file_name"),
+                    "file_type": base_run.get("file_type"),
+                    "file_size": base_run.get("file_size"),
+                    "pac_ingest": json.dumps(base_run.get("pac_ingest") or {}),
+                    "graphrag_ingest": json.dumps(base_run.get("graphrag_ingest") or {}),
+                    "errors_json": json.dumps(base_run.get("errors") or {}) if base_run.get("errors") else None,
+                    "pac_query": json.dumps(pac_query or {}),
+                    "graphrag_query": json.dumps(graphrag_query or {}),
+                    "query_text": query_text,
+                    "created_at": created_at,
                 },
             )
 
@@ -196,6 +244,13 @@ class CompareRepository:
         data.setdefault("confidence_score", None)
         return data
 
+    async def _ensure_query_text_column(self) -> None:
+        try:
+            async with self.sqlite_engine.begin() as conn:
+                await conn.execute(sa_text("ALTER TABLE compare_runs ADD COLUMN query_text TEXT"))
+        except Exception:
+            pass
+
     def _serialize_run(self, run: CompareRun) -> Dict:
         return {
             "id": run.id,
@@ -203,6 +258,7 @@ class CompareRepository:
             "file_name": run.file_name,
             "file_type": run.file_type,
             "file_size": run.file_size,
+            "query_text": getattr(run, "query_text", None),
             "pac_ingest": json.loads(run.pac_ingest_json or "{}"),
             "graphrag_ingest": json.loads(run.graphrag_ingest_json or "{}"),
             "pac_query": self._deserialize_query_json(run.pac_query_json),

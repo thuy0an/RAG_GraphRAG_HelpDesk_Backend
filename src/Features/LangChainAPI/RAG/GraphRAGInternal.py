@@ -61,6 +61,11 @@ Nếu câu hỏi được đặt bằng tiếng Anh, hãy trả lời bằng ti�
 Nếu không tìm thấy thông tin trong ngữ cảnh, hãy trả lời: "Tôi không có đủ thông tin về vấn đề này, vui lòng liên hệ bộ phận hỗ trợ."
 Không sử dụng bất kỳ ngôn ngữ nào khác ngoài tiếng Việt hoặc tiếng Anh.
 
+Hướng dẫn trả lời:
+- Trả lời chi tiết và có cấu trúc rõ ràng.
+- Ưu tiên trình bày theo 3 phần: Tóm tắt ngắn (1-2 câu), Chi tiết (gạch đầu dòng hoặc các bước), Kết luận/ghi chú nếu cần.
+- Chỉ sử dụng thông tin trong ngữ cảnh, không suy diễn ngoài ngữ cảnh.
+
 === Tổng quan tài liệu ===
 {doc_summary}
 
@@ -206,7 +211,11 @@ Trả lời:"""
                 page_number = chunk.metadata.get("page_number")
                 if page_number is None:
                     page_number = chunk.metadata.get("page")
-                if isinstance(page_number, int) and page_number >= 0:
+                fallback_page = False
+                if page_number is None:
+                    page_number = 1
+                    fallback_page = True
+                if isinstance(page_number, int) and page_number >= 0 and not fallback_page:
                     page_number = page_number + 1
                 chunk.metadata["page_number"] = page_number
 
@@ -359,16 +368,19 @@ Trả lời:"""
             return
 
         faiss_store = self._get_faiss_store()
-        if faiss_store is None:
-            return
-
-        if faiss_store.index.ntotal == 0:
+        if faiss_store is None or faiss_store.index.ntotal == 0:
+            # Chưa có index hoặc index rỗng → tạo mới từ chunks
             faiss_store = self._rebuild_faiss_index(chunks)
+            if faiss_store is None:
+                log.warning("FAISS not available, skipping FAISS index creation")
+                return
         else:
             faiss_store.add_documents(chunks)
 
+        self._faiss_index_dir.mkdir(parents=True, exist_ok=True)
         faiss_store.save_local(str(self._faiss_index_dir))
         self._faiss_index = faiss_store
+        log.info(f"FAISS index saved to {self._faiss_index_dir} ({faiss_store.index.ntotal} vectors)")
 
     def _get_faiss_store(self):
         if self._faiss_loaded:
@@ -388,10 +400,12 @@ Trả lời:"""
                     self.embedding,
                     allow_dangerous_deserialization=True,
                 )
+                log.info(f"FAISS index loaded from {self._faiss_index_dir} ({self._faiss_index.index.ntotal} vectors)")
                 return self._faiss_index
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning(f"Failed to load FAISS index from {self._faiss_index_dir}: {e}")
 
+        log.info(f"No FAISS index found at {self._faiss_index_dir}, will use Neo4j vector search")
         self._faiss_index = None
         return self._faiss_index
 
@@ -433,8 +447,10 @@ Trả lời:"""
             return []
 
     def vector_search_chunks(self, query_embedding: List[float], k: int = 8, doc_ids: Optional[List[str]] = None) -> List[Dict]:
+        # 1. Thử FAISS trước (nhanh nhất)
         faiss_store = self._get_faiss_store()
-        if faiss_store:
+        if faiss_store and faiss_store.index.ntotal > 0:
+            log.debug(f"Using FAISS index for search (doc_ids={doc_ids})")
             results = faiss_store.similarity_search_with_score_by_vector(query_embedding, k=k * 5)
             hits = []
             for doc, score in results:
@@ -450,11 +466,20 @@ Trả lời:"""
                 })
                 if len(hits) >= k:
                     break
-            return hits
+            if hits:
+                log.info(f"FAISS returned {len(hits)} hits")
+                return hits
+            log.warning("FAISS returned 0 hits (index may be stale or doc_ids filter too strict), falling back to Neo4j")
+
+        # 2. Fallback: Neo4j vector index
+        log.debug(f"Using Neo4j vector index for search (doc_ids={doc_ids})")
         vector_hits = self._vector_index_search(query_embedding, k=k, doc_ids=doc_ids)
         if vector_hits:
+            log.info(f"Neo4j vector index returned {len(vector_hits)} hits")
             return vector_hits
 
+        # 3. Last resort: cosine search trực tiếp trên Neo4j
+        log.warning("Neo4j vector index returned 0 hits, trying cosine search")
         return self._cosine_search_chunks(query_embedding, k=k, doc_ids=doc_ids)
 
     def _cosine_search_chunks(self, query_embedding: List[float], k: int = 8, doc_ids: Optional[List[str]] = None) -> List[Dict]:
@@ -497,7 +522,7 @@ Trả lời:"""
             doc_id = hit.get("doc_id")
             if not doc_id or doc_id not in pages_by_doc:
                 continue
-            page_number = hit.get("page_number")
+            page_number = self._coerce_page_number(hit.get("page_number"))
             if isinstance(page_number, int):
                 pages_by_doc[doc_id].add(page_number)
 
@@ -514,6 +539,27 @@ Trả lời:"""
                 }
             )
 
+        return sources
+
+    def collect_sources_from_passages(self, doc_passages: List[dict]) -> List[Dict]:
+        pages_by_file: Dict[str, set] = {}
+        for passage in doc_passages:
+            if not isinstance(passage, dict):
+                continue
+            filename = passage.get("filename") or "Không rõ"
+            pages = passage.get("pages") or []
+            pages_by_file.setdefault(filename, set())
+            for page in pages:
+                page_number = self._coerce_page_number(page)
+                if isinstance(page_number, int):
+                    pages_by_file[filename].add(page_number)
+
+        sources = []
+        for filename, pages in pages_by_file.items():
+            sources.append({
+                "filename": filename,
+                "pages": sorted(pages),
+            })
         return sources
 
     def get_graph_stats(self, source: Optional[str] = None) -> Dict:
@@ -556,6 +602,8 @@ Trả lời:"""
         section_ids = set()
         doc_ids = set()
 
+        self._hydrate_hits(hits)
+
         # Collect all doc_ids first to batch-lookup filenames
         for hit in hits:
             if hit.get("doc_id"):
@@ -573,7 +621,7 @@ Trả lời:"""
             seen_chunks.add(chunk_id)
             text = hit.get("text") or hit.get("content", "")
             if text:
-                page_number = hit.get("page_number")
+                page_number = self._coerce_page_number(hit.get("page_number"))
                 # Resolve filename: prefer hit's own filename, fallback to doc lookup
                 filename = hit.get("filename") or id_to_filename.get(hit.get("doc_id", ""), "")
                 doc_passages.append({
@@ -585,6 +633,59 @@ Trả lời:"""
                 section_ids.add(hit["section_id"])
 
         return doc_passages, section_ids, doc_ids
+
+    def _hydrate_hits(self, hits: List[Dict]) -> None:
+        if not hits:
+            return
+        missing_chunk_ids = []
+        for hit in hits:
+            chunk_id = hit.get("chunk_id") or hit.get("id")
+            if not chunk_id:
+                continue
+            if not hit.get("doc_id") or hit.get("page_number") is None or not hit.get("filename"):
+                missing_chunk_ids.append(chunk_id)
+
+        if not missing_chunk_ids:
+            return
+
+        chunk_label = self._label("Chunk")
+        doc_label = self._label("Document")
+        results = self.neo4j_store.execute_query(
+            f"""
+            UNWIND $ids AS cid
+            MATCH (c:{chunk_label} {{id: cid}})
+            OPTIONAL MATCH (d:{doc_label} {{id: c.doc_id}})
+            RETURN c.id AS chunk_id, c.doc_id AS doc_id, c.page_number AS page_number, d.filename AS filename
+        """,
+            {"ids": missing_chunk_ids},
+        )
+        lookup = {row.get("chunk_id"): row for row in results}
+
+        for hit in hits:
+            chunk_id = hit.get("chunk_id") or hit.get("id")
+            if not chunk_id:
+                continue
+            info = lookup.get(chunk_id)
+            if not info:
+                continue
+            if not hit.get("doc_id") and info.get("doc_id"):
+                hit["doc_id"] = info.get("doc_id")
+            if hit.get("page_number") is None and info.get("page_number") is not None:
+                hit["page_number"] = info.get("page_number")
+            if not hit.get("filename") and info.get("filename"):
+                hit["filename"] = info.get("filename")
+
+    def _coerce_page_number(self, value):
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float) and value.is_integer():
+            return int(value)
+        if isinstance(value, str):
+            trimmed = value.strip()
+            if trimmed.isdigit():
+                return int(trimmed)
+            return trimmed or None
+        return None
 
     def extract_query_entities(self, question: str) -> List[str]:
         try:
