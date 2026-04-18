@@ -83,3 +83,4 @@ dmypy.json
 specs/
 static/
 config_env/
+openapi.json

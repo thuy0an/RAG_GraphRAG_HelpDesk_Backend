@@ -78,6 +78,6 @@ class Neo4jManager:
         self.close()
         self._initialize_driver()
 
-
-def get_neo4j_manager() -> Neo4jManager:
+def get_neo4j_session() -> Neo4jManager:
+    """Dependency để get Neo4j manager"""
     return Neo4jManager()

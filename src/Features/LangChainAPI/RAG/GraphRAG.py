@@ -12,6 +12,7 @@ from src.Features.LangChainAPI.RAG.BaseRAG import BaseRAG
 from src.Features.LangChainAPI.persistence.Neo4JStore import Neo4JStore
 from src.Features.LangChainAPI.RAG.GraphRAGInternal import GraphRAGInternal
 from SharedKernel.threading.ThreadPoolManager import ThreadPoolManager
+from src.Features.ConversationAPI.ConversationService import ConversationService
 
 log = logging.getLogger(__name__)
 
@@ -20,13 +21,15 @@ class GraphRAG(BaseRAG):
     def __init__(
         self,
         provider: BaseChatModel,
-        embedding: Embeddings
+        embedding: Embeddings,
+        conversation_service: ConversationService = None
     ) -> None:
         super().__init__(provider, embedding)
         self._neo4j_store = None
         self.thread_pool = ThreadPoolManager()
         self._config = load_env_yaml()
         self._internal = None
+        self.conversation_service = conversation_service
 
     @property
     def neo4j_store(self):
@@ -104,11 +107,26 @@ class GraphRAG(BaseRAG):
         log.info(f"Starting GraphRAG query: {query}")
 
         try:
-            if session_id:
-                with metrics.stage("memory_add_user"):
-                    await self.memory_repo.add_message(
-                        session_id=session_id, role="user", content=query
+            log.info(f"GraphRAG DEBUG: session_id={session_id}, conversation_service={self.conversation_service}")
+            
+            if not session_id:
+                from fastapi import HTTPException
+                raise HTTPException(
+                    status_code=400, 
+                    detail="session_id is required for GraphRAG query"
+                )
+                
+            with metrics.stage("memory_add_user"):
+                log.info(f"GraphRAG DEBUG: Adding user message to conversation history")
+                if self.conversation_service:
+                    await self.conversation_service.add_conversation_history(
+                        session_id=session_id,
+                        role="graph-user",
+                        content=query
                     )
+                    log.info(f"GraphRAG DEBUG: User message added successfully")
+                else:
+                    log.warning(f"GraphRAG DEBUG: conversation_service is None, cannot add user message")
 
             with metrics.stage("embed_query"):
                 query_embedding = self.embedding.embed_query(query)
@@ -154,11 +172,17 @@ class GraphRAG(BaseRAG):
                 response = self.provider.invoke(prompt)
                 answer = response.content.strip()
 
-            if session_id:
-                with metrics.stage("memory_add_assistant"):
-                    await self.memory_repo.add_message(
-                        session_id=session_id, role="assistant", content=answer
+            with metrics.stage("conversation_add_assistant"):
+                log.info(f"GraphRAG DEBUG: Adding assistant message to conversation history")
+                if self.conversation_service:
+                    await self.conversation_service.add_conversation_history(
+                        session_id=session_id,
+                        role="graph-assistant",
+                        content=answer
                     )
+                    log.info(f"GraphRAG DEBUG: Assistant message added successfully")
+                else:
+                    log.warning(f"GraphRAG DEBUG: conversation_service is None, cannot add assistant message")
 
             metrics.log_summary()
             log.info("GraphRAG query completed")
@@ -180,7 +204,11 @@ class GraphRAG(BaseRAG):
         **kwargs
     ) -> dict:
         start = time.perf_counter()
-        result = await self.retrieve(query, session_id=session_id, source=source, **kwargs)
+        result = await self.retrieve(
+            query, 
+            session_id=session_id, 
+            source=source, **kwargs
+        )
         total_time = time.perf_counter() - start
         answer = result.get("answer", "")
         return {

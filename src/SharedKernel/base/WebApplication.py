@@ -16,7 +16,6 @@ from SharedKernel.base.Logger import get_logger
 from scalar_fastapi import get_scalar_api_reference
 from fastapi.middleware.cors import CORSMiddleware
 from src.SharedKernel.exception.APIException import APIException
-from SharedKernel.base.DIContainer import DIContainer
 
 log = get_logger(__name__)
 
@@ -25,7 +24,6 @@ class WebApplication(FastAPI):
         kwargs.setdefault("title", "API")
         kwargs.setdefault("docs_url", None)
         kwargs.setdefault("redoc_url", None)
-        # kwargs.setdefault("lifespan", lifespan)
         
         # Configure OpenAPI security scheme for Bearer token
         kwargs["openapi_tags"] = kwargs.get("openapi_tags", [])

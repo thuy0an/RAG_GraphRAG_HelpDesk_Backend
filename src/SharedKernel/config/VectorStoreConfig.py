@@ -13,7 +13,6 @@ log = get_logger(__name__)
 config = load_env_yaml()
 redis_config = load_redis_index()
 
-
 class VectoreStoreConfig(ABC):
     @abstractmethod
     def get_vecstore(self, embedding: Embeddings) -> VectorStore:

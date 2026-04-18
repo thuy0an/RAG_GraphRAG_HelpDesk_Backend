@@ -50,9 +50,6 @@ class Loader:
     ...
 
     async def load_pdf(self, file: UploadFile):
-        if file.filename and not file.filename.lower().endswith(".pdf"):
-            raise APIException(f"File {file.filename} is not a PDF file")
-
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as temp_file:
             shutil.copyfileobj(file.file, temp_file)
             temp_path = temp_file.name
@@ -62,7 +59,7 @@ class Loader:
         suffix = os.path.splitext(file.filename)[1].upper() if file.filename else ".PDF"
         path = os.path.basename(temp_path)
 
-        logger.info(f"DOCUMENT LOADER\nFile:  {file.filename}\nType:  {suffix}\nSize:  {file_size_kb:.1f} KB")
+        logger.info(f"DOCUMENT LOADER:File:  {file.filename} - Type:  {suffix} - Size:  {file_size_kb:.1f} KB")
 
         loader = UnstructuredPDFLoader(temp_path, mode="paged", strategy="fast")
         documents = loader.load()

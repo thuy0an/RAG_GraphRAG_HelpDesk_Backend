@@ -12,40 +12,40 @@ from Features.LangChainAPI.LangChainDTO import ChatRequest
 from SharedKernel.persistence.Decorators import Controller
 from src.SharedKernel.base.APIResponse import APIResponse
 from src.Features.LangChainAPI.persistence.CompareRepository import CompareRepository
+from src.Features.RealTimeAPI.FileSystem.StorageService import StorageService
 
 
 @Controller
 class LangChainController:
     def __init__(self, app: FastAPI) -> None:
         self.app = app
-        self.router = APIRouter(prefix="/api/v1/langchain", tags=["LangChain"])
-        self.tool_router = APIRouter(prefix="/api/v1/tools", tags=["Tools"])
+        self.adv_router = APIRouter(
+            prefix="/api/v1/langchain/naive", tags=["Naive RAG"]
+        )
+        self.adv_router = APIRouter(
+            prefix="/api/v1/langchain/adv", tags=["Advanced RAG"]
+        )
+        self.graph_router = APIRouter(
+            prefix="/api/v1/langchain/graph", tags=["Graph RAG"]
+        )
+        self.tool_router = APIRouter(prefix="/api/v1/langchain/tools", tags=["Tools"])
+        self.compare_router = APIRouter(
+            prefix="/api/v1/langchain/compare", tags=["Compare"]
+        )
+
         self.tools = LangTools()
         self.register_route()
-        self.app.include_router(self.router)
 
-    def register_route(self):
-        compare_repo = CompareRepository()
-        #
-        # RAG
-        #
-        @self.router.get("/chat_history/{session_id}")
-        async def get_chat_history(
-            session_id: str, langfacade: LangChainFacade = Depends()
-        ):
-            """Get paginated chat history for a session"""
-            response = await langfacade.PaCRAG.get_chat_history(
-                session_id=session_id,
-            )
+        self.app.include_router(self.adv_router)
+        self.app.include_router(self.graph_router)
+        self.app.include_router(self.tool_router)
+        self.app.include_router(self.compare_router)
 
-            return APIResponse(
-                message="Chat history retrieved successfully",
-                status_code=status.HTTP_200_OK,
-                data=response,
-            )
+    def register_adv_routes(self):
+        """Register PaCRAG routes"""
 
-        @self.router.post("/load_document_pdf_PaC")
-        async def load_document_pdf_PaC(
+        @self.adv_router.post("/load_document")
+        async def load_document(
             files: List[UploadFile] = File(...),
             parent_chunk_size: int | None = Form(None),
             parent_chunk_overlap: int | None = Form(None),
@@ -65,38 +65,24 @@ class LangChainController:
             return APIResponse(
                 message=f"Successfully indexing {len(files)} PDF file(s)",
                 status_code=status.HTTP_200_OK,
-                data=None,
+                result=None,
             )
 
         class DeleteDocumentRequest(BaseModel):
             filename: str
 
-        @self.router.delete("/delete_document")
+        @self.adv_router.delete("/delete_document")
         async def delete_document(
-            req: DeleteDocumentRequest, 
-            langfacade: LangChainFacade = Depends()
+            req: DeleteDocumentRequest, langfacade: LangChainFacade = Depends()
         ):
             await langfacade.PaCRAG.delete(req.filename)
             return APIResponse(
                 message=f"Delete successfully",
                 status_code=status.HTTP_200_OK,
-                data=None,
-            )
-            ...
-
-        @self.router.delete("/clear_history/{session_id}")
-        async def clear_chat_history(
-            session_id: str,
-            langfacade: LangChainFacade = Depends(),
-        ):
-            deleted = await langfacade.PaCRAG.clear_history(session_id)
-            return APIResponse(
-                message="Chat history cleared",
-                status_code=status.HTTP_200_OK,
-                data={"deleted": deleted},
+                result=None,
             )
 
-        @self.router.delete("/clear_vector_store")
+        @self.adv_router.delete("/clear_vector_store")
         async def clear_vector_store(
             source: str | None = Query(default=None),
             langfacade: LangChainFacade = Depends(),
@@ -105,13 +91,94 @@ class LangChainController:
             return APIResponse(
                 message="Vector store cleared",
                 status_code=status.HTTP_200_OK,
-                data={"source": source},
+                result={"source": source},
             )
 
-        #
-        # COMPARE (PaCRAG vs GraphRAG)
-        #
-        @self.router.post("/compare/upload")
+        class RetrieveDocumentRequest(BaseModel):
+            query: str
+            session_id: str
+
+        @self.adv_router.post("/retrieve_document")
+        async def retrieve_document(
+            req: RetrieveDocumentRequest, 
+            langfacade: LangChainFacade = Depends()
+        ):
+            return StreamingResponse(
+                langfacade.PaCRAG.retrieve(req.query, req.session_id),
+                media_type="text/event-stream",
+            )
+
+    def register_graph_routes(self):
+        """Register GraphRAG routes"""
+
+        @self.graph_router.post("/build")
+        async def build_graph(
+            file: UploadFile = File(...), langfacade: 
+            LangChainFacade = Depends()
+        ):
+            source = file.filename
+            result = await langfacade.GraphRAG.ingest(file, source)
+
+            return APIResponse(
+                message="Graph built successfully",
+                status_code=status.HTTP_200_OK,
+                result=result,
+            )
+
+        @self.graph_router.get("/{source}/stats")
+        async def get_graph_stats(source: str, langfacade: LangChainFacade = Depends()):
+            stats = langfacade.GraphRAG.internal.get_graph_stats(source)
+
+            return APIResponse(
+                message="Graph stats retrieved",
+                status_code=status.HTTP_200_OK,
+                result=stats,
+            )
+
+        class GraphSearchRequest(BaseModel):
+            query: str
+            top_k: int = 5
+
+        @self.graph_router.post("/search")
+        async def search_graph(
+            req: GraphSearchRequest, langfacade: LangChainFacade = Depends()
+        ):
+            results = await langfacade.GraphRAG.neo4j_store.search_by_embedding(
+                req.query, req.top_k
+            )
+            return APIResponse(
+                message="Search completed",
+                status_code=status.HTTP_200_OK,
+                result={"results": results},
+            )
+
+        class GraphQueryRequest(BaseModel):
+            query: str
+            session_id: str
+            source: Optional[str] = None
+
+        @self.graph_router.post("/query")
+        async def query_graph(
+            req: GraphQueryRequest, langfacade: LangChainFacade = Depends()
+        ):
+            result = await langfacade.GraphRAG.retrieve(req.query, session_id=req.session_id, source=req.source)
+            return APIResponse(
+                message="Query completed", status_code=status.HTTP_200_OK, result=result
+            )
+
+        @self.graph_router.delete("/{source}")
+        async def delete_graph(source: str, langfacade: LangChainFacade = Depends()):
+            await langfacade.GraphRAG.delete(source)
+            return APIResponse(
+                message="Graph deleted successfully",
+                status_code=status.HTTP_200_OK,
+                result=None,
+            )
+
+    def register_compare_routes(self):
+        """Register Compare (PaCRAG vs GraphRAG) routes"""
+
+        @self.compare_router.post("/upload")
         async def compare_upload(
             files: List[UploadFile] = File(...),
             session_id: str = Form(...),
@@ -119,59 +186,47 @@ class LangChainController:
             parent_chunk_overlap: int | None = Form(None),
             child_chunk_size: int | None = Form(None),
             child_chunk_overlap: int | None = Form(None),
+            storage_service: StorageService = Depends(),
             langfacade: LangChainFacade = Depends(),
+            compare_repo: CompareRepository = Depends(),
         ):
             results = []
 
-            for file in files:
-                content = await file.read()
+            # Step 1: Save files and index with PaCRAG using chunking via StorageService
+            chunked_response = await storage_service.save_files_with_chunking(
+                files=files,
+                parent_chunk_size=parent_chunk_size,
+                parent_chunk_overlap=parent_chunk_overlap,
+                child_chunk_size=child_chunk_size,
+                child_chunk_overlap=child_chunk_overlap
+            )
+
+            # Step 2: Index with GraphRAG for each file
+            for i, file in enumerate(files):
                 content_type = file.content_type or "application/octet-stream"
-                upload_headers = Headers({"content-type": content_type})
-                pac_file = UploadFile(
-                    filename=file.filename,
-                    file=io.BytesIO(content),
-                    headers=upload_headers,
-                )
-                graph_file = UploadFile(
-                    filename=file.filename,
-                    file=io.BytesIO(content),
-                    headers=upload_headers,
-                )
+                pac_metrics = chunked_response.indexing_results[i] if i < len(chunked_response.indexing_results) else {}
+                uploaded_file_info = chunked_response.uploaded_files[i] if i < len(chunked_response.uploaded_files) else {}
+                file_size = uploaded_file_info.get("size", 0) if isinstance(uploaded_file_info, dict) else 0
 
-                pac_task = langfacade.PaCRAG.index_with_metrics(
-                    pac_file,
-                    parent_chunk_size=parent_chunk_size,
-                    parent_chunk_overlap=parent_chunk_overlap,
-                    child_chunk_size=child_chunk_size,
-                    child_chunk_overlap=child_chunk_overlap,
-                )
-                graph_task = langfacade.GraphRAG.ingest(graph_file, file.filename)
+                # Reset file pointer for GraphRAG
+                await file.seek(0)
 
-                pac_result, graph_result = await asyncio.gather(
-                    pac_task, graph_task, return_exceptions=True
-                )
-
-                errors = {}
-                if isinstance(pac_result, Exception):
-                    errors["pac"] = str(pac_result)
-                    pac_metrics = {}
-                else:
-                    pac_metrics = pac_result
-
-                if isinstance(graph_result, Exception):
-                    errors["graphrag"] = str(graph_result)
-                    graph_metrics = {}
-                else:
+                try:
+                    graph_result = await langfacade.GraphRAG.ingest(file, file.filename)
                     graph_metrics = graph_result
+                    errors = None
+                except Exception as e:
+                    graph_metrics = {}
+                    errors = {"graphrag": str(e)}
 
                 run = await compare_repo.create_run(
                     session_id=session_id,
                     file_name=file.filename,
                     file_type=content_type,
-                    file_size=len(content),
+                    file_size=file_size,
                     pac_ingest=pac_metrics,
                     graphrag_ingest=graph_metrics,
-                    errors=errors or None,
+                    errors=errors,
                 )
 
                 results.append(run)
@@ -179,7 +234,7 @@ class LangChainController:
             return APIResponse(
                 message="Comparison ingest completed",
                 status_code=status.HTTP_200_OK,
-                data={"runs": results},
+                result={"runs": results},
             )
 
         class CompareQueryRequest(BaseModel):
@@ -187,31 +242,25 @@ class LangChainController:
             run_id: str
             query: str
 
-        @self.router.post("/compare/query")
+        @self.compare_router.post("/query")
         async def compare_query(
             req: CompareQueryRequest,
             langfacade: LangChainFacade = Depends(),
+            compare_repo: CompareRepository = Depends(),
         ):
-            pac_task = langfacade.PaCRAG.retrieve_full(req.query, session_id=req.session_id)
-            graph_task = langfacade.GraphRAG.retrieve_with_metrics(req.query, source=None)
-
-            pac_result, graph_result = await asyncio.gather(
-                pac_task, graph_task, return_exceptions=True
+            pac_result = await langfacade.PaCRAG.retrieve_with_metrics(
+                req.query,
+                session_id=req.session_id
+            )
+            graph_result = await langfacade.GraphRAG.retrieve_with_metrics(
+                req.query,
+                session_id=req.session_id,
+                source=None
             )
 
             errors = {}
-            pac_metrics = None
-            graph_metrics = None
-
-            if isinstance(pac_result, Exception):
-                errors["pac"] = str(pac_result)
-            else:
-                pac_metrics = pac_result
-
-            if isinstance(graph_result, Exception):
-                errors["graphrag"] = str(graph_result)
-            else:
-                graph_metrics = graph_result
+            pac_metrics = pac_result or {}
+            graph_metrics = graph_result or {}
 
             run = await compare_repo.update_query_metrics(
                 req.run_id,
@@ -222,126 +271,39 @@ class LangChainController:
             return APIResponse(
                 message="Comparison query completed",
                 status_code=status.HTTP_200_OK,
-                data={
+                result={
                     "run": run,
                     "errors": errors or None,
                 },
             )
 
-        @self.router.get("/compare/history/{session_id}")
+        @self.compare_router.get("/history/{session_id}")
         async def compare_history(
             session_id: str,
+            compare_repo: CompareRepository = Depends(),
         ):
             runs = await compare_repo.list_runs(session_id)
             return APIResponse(
                 message="Comparison history retrieved",
                 status_code=status.HTTP_200_OK,
-                data={"runs": runs},
+                result={"runs": runs},
             )
 
-        @self.router.delete("/compare/history/{run_id}")
+        @self.compare_router.delete("/history/{run_id}")
         async def compare_history_delete(
             run_id: str,
+            compare_repo: CompareRepository = Depends(),
         ):
             deleted = await compare_repo.delete_run(run_id)
             return APIResponse(
                 message="Comparison run deleted",
                 status_code=status.HTTP_200_OK,
-                data={"deleted": deleted},
+                result={"deleted": deleted},
             )
 
-        class RetrieveDocumentRequest(BaseModel):
-            query: str
-            session_id: str
+    def register_tool_routes(self):
+        """Register Tool routes"""
 
-        @self.router.post("/retrieve_document")
-        async def retrieve_document(
-            req: RetrieveDocumentRequest, 
-            langfacade: LangChainFacade = Depends()
-        ):
-            return StreamingResponse(
-                langfacade.PaCRAG.retrieve(req.query, req.session_id),
-                media_type="text/event-stream",
-            )
-            ...
-
-        #
-        # GRAPH
-        # 
-        @self.router.post("/build-graph")
-        async def build_graph(
-            file: UploadFile = File(...),
-            langfacade: LangChainFacade = Depends()
-        ):
-            source = file.filename
-            result = await langfacade.GraphRAG.ingest(file, source)
-            return APIResponse(
-                message="Graph built successfully",
-                status_code=status.HTTP_200_OK,
-                data=result,
-            )
-
-        @self.router.get("/graph/{source}/stats")
-        async def get_graph_stats(
-            source: str,
-            langfacade: LangChainFacade = Depends()
-        ):
-            stats = langfacade.GraphRAG.internal.get_graph_stats(source)
-            return APIResponse(
-                message="Graph stats retrieved",
-                status_code=status.HTTP_200_OK,
-                data=stats,
-            )
-
-        class GraphSearchRequest(BaseModel):
-            query: str
-            top_k: int = 5
-
-        @self.router.post("/graph/search")
-        async def search_graph(
-            req: GraphSearchRequest,
-            langfacade: LangChainFacade = Depends()
-        ):
-            results = await langfacade.GraphRAG.neo4j_store.search_by_embedding(
-                req.query, req.top_k
-            )
-            return APIResponse(
-                message="Search completed",
-                status_code=status.HTTP_200_OK,
-                data={"results": results},
-            )
-
-        class GraphQueryRequest(BaseModel):
-            query: str
-            source: Optional[str] = None
-
-        @self.router.post("/graph/query")
-        async def query_graph(
-            req: GraphQueryRequest,
-            langfacade: LangChainFacade = Depends()
-        ):
-            result = await langfacade.GraphRAG.retrieve(req.query, source=req.source)
-            return APIResponse(
-                message="Query completed", status_code=status.HTTP_200_OK, data=result
-            )
-
-        @self.router.delete("/graph/{source}")
-        async def delete_graph(
-            source: str,
-            langfacade: LangChainFacade = Depends()
-        ):
-            await langfacade.GraphRAG.delete(source)
-            return APIResponse(
-                message="Graph deleted successfully",
-                status_code=status.HTTP_200_OK,
-                data=None,
-            )
-
-        ...
-
-        #
-        # TOOL 
-        #
         @self.tool_router.post("/tool_search")
         async def web_search(req: ChatRequest):
             urls = await self.tools.duckduckgo_search(req.message)
@@ -358,9 +320,13 @@ class LangChainController:
 
         @self.tool_router.post("/fetch")
         def web_asfetch(req: ChatRequest):
-            # content = await self.tools.crawl(req.message)
             return StreamingResponse(
                 self.tools.ascrawl_web(req.message), media_type="text/event-stream"
             )
 
-    ...
+    def register_route(self):
+        """Register all routes"""
+        self.register_adv_routes()
+        self.register_compare_routes()
+        self.register_graph_routes()
+        self.register_tool_routes()

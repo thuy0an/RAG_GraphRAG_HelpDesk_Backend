@@ -4,9 +4,6 @@ from sqlmodel import select, text
 from sqlmodel.ext.asyncio.session import AsyncSession
 from SharedKernel.persistence.BaseRepository import BaseRepository
 from SharedKernel.persistence.PersistenceManager import PersistenceManagerFactory
-from SharedKernel.utils.yamlenv import load_env_yaml
-
-config = load_env_yaml()
 
 T = TypeVar("T", bound=BaseModel)
 ID = TypeVar("ID")

@@ -29,7 +29,7 @@ class AuthController:
             return APIResponse(
                 message="Get accounts",
                 status_code=status.HTTP_200_OK,
-                data=result
+                result=result
             )
 
         @self.router.post("/sign-up")
@@ -41,7 +41,7 @@ class AuthController:
             return APIResponse(
                 message="Account created successfully",
                 status_code=status.HTTP_201_CREATED,
-                data=result
+                result=result
             )
 
         @self.router.post("/sign-in", description="Login account")
@@ -53,7 +53,7 @@ class AuthController:
             return APIResponse(
                 message="Login successfully",
                 status_code=status.HTTP_200_OK,
-                data={
+                result={
                     "access_token": result
                 }
             )
@@ -67,7 +67,7 @@ class AuthController:
             return APIResponse(
                 message="User retrieved successfully",
                 status_code=status.HTTP_200_OK,
-                data=result
+                result=result
             )
 
         @self.router.put("/account/{id}", description="Update account")
@@ -80,7 +80,7 @@ class AuthController:
             return APIResponse(
                 message="Account updated successfully",
                 status_code=status.HTTP_200_OK,
-                data=result
+                result=result
             )
 
         @self.router.delete("/account/{id}", description="Soft delete account")
@@ -92,7 +92,7 @@ class AuthController:
             return APIResponse(
                 message="Account deleted successfully",
                 status_code=status.HTTP_200_OK,
-                data=result
+                result=result
             )
 
         # Role-based access control demo endpoints
@@ -105,7 +105,7 @@ class AuthController:
             return APIResponse(
                 message="Welcome Admin!",
                 status_code=status.HTTP_200_OK,
-                data={
+                result={
                     "username": user["username"],
                     "role": user["role"],
                     "user_id": user["user_id"]

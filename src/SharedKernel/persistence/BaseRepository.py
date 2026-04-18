@@ -46,22 +46,6 @@ class BaseRepository:
             await self.session.rollback()
             raise e
 
-    # async def execute_raw(
-    #     self,
-    #     sql: str
-    # ) ->  RawQueryResult:
-    #     try:
-    #         stmt = text(sql)
-            
-    #         result = await self.session.exec(stmt)
-    #         await self.session.commit()
-            
-    #         return {"affected_rows": result.rowcount}
-                
-    #     except Exception as e:
-    #         await self.session.rollback()
-    #         raise e
-
     async def execute(
         self,
         sql: str,
@@ -76,7 +60,7 @@ class BaseRepository:
             result = await self.session.execute(stmt)
             await self.session.commit()
             
-            return {"affected_rows": result.rowcount}
+            return { "affected_rows": result.rowcount }
                 
         except Exception as e:
             await self.session.rollback()

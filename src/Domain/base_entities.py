@@ -2,28 +2,14 @@ import uuid6
 from typing import Optional
 import datetime
 import enum
-from sqlalchemy import CHAR, Column, Enum, Index, Integer, JSON, String, TIMESTAMP, Text, text
-from sqlalchemy.dialects.mysql import TINYINT, VARCHAR
+
+from sqlalchemy import CHAR, Column, Enum, Index, Integer, String, TIMESTAMP, Text, text
 from sqlmodel import Field, SQLModel
 
 class AccountsRole(str, enum.Enum):
     ADMIN = 'ADMIN'
     AGENT = 'AGENT'
     CUSTOMER = 'CUSTOMER'
-
-
-class TicketsPriority(str, enum.Enum):
-    LOW = 'LOW'
-    MEDIUM = 'MEDIUM'
-    HIGH = 'HIGH'
-    URGENT = 'URGENT'
-
-
-class TicketsStatus(str, enum.Enum):
-    OPEN = 'OPEN'
-    IN_PROGRESS = 'IN_PROGRESS'
-    RESOLVED = 'RESOLVED'
-    CLOSED = 'CLOSED'
 
 
 class Accounts(SQLModel, table=True):
@@ -39,59 +25,51 @@ class Accounts(SQLModel, table=True):
     full_name: Optional[str] = Field(default=None, sa_column=Column('full_name', String(255)))
     password: Optional[str] = Field(default=None, sa_column=Column('password', String(128)))
     role: Optional[AccountsRole] = Field(default=None, sa_column=Column('role', Enum(AccountsRole, values_callable=lambda cls: [member.value for member in cls]), server_default=text("'CUSTOMER'")))
-    department_id: Optional[str] = Field(default=None, sa_column=Column('department_id', CHAR(36)))
-    created_at: Optional[datetime.datetime] = Field(default=None, sa_column=Column('created_at', TIMESTAMP, server_default=text('(now())')))
+    created_at: Optional[datetime.datetime] = Field(default=None, sa_column=Column('created_at', TIMESTAMP, server_default=text('CURRENT_TIMESTAMP')))
     delete_at: Optional[datetime.datetime] = Field(default=None, sa_column=Column('delete_at', TIMESTAMP))
 
 
-class Attachment(SQLModel, table=True):
-    __tablename__ = 'Attachment'
+class Attachments(SQLModel, table=True):
+    __tablename__ = 'Attachments'
 
     id: str = Field(default_factory=lambda: str(uuid6.uuid7()), sa_column=Column(CHAR(36), primary_key=True))
     type: Optional[str] = Field(default=None, sa_column=Column('type', String(128)))
-    file_name: Optional[str] = Field(default=None, sa_column=Column('file_name', VARCHAR(255, charset='utf8mb3', collation='utf8mb3_general_ci')))
-    url: Optional[str] = Field(default=None, sa_column=Column('url', VARCHAR(255, charset='utf8mb3', collation='utf8mb3_general_ci')))
-    created_at: Optional[datetime.datetime] = Field(default=None, sa_column=Column('created_at', TIMESTAMP, server_default=text('(now())')))
+    file_name: Optional[str] = Field(default=None, sa_column=Column('file_name', String(255)))
+    url: Optional[str] = Field(default=None, sa_column=Column('url', String(255)))
+    created_at: Optional[datetime.datetime] = Field(default=None, sa_column=Column('created_at', TIMESTAMP, server_default=text('CURRENT_TIMESTAMP')))
     delete_at: Optional[datetime.datetime] = Field(default=None, sa_column=Column('delete_at', TIMESTAMP))
 
 
-class Departments(SQLModel, table=True):
-    __tablename__ = 'Departments'
+class CompareRuns(SQLModel, table=True):
+    __tablename__ = 'CompareRuns'
+    __table_args__ = (
+        Index('idx_compare_created_at', 'created_at'),
+        Index('idx_compare_session_id', 'session_id'),
+        Index('idx_compare_session_time', 'session_id', 'created_at')
+    )
 
     id: str = Field(default_factory=lambda: str(uuid6.uuid7()), sa_column=Column(CHAR(36), primary_key=True))
-    name: Optional[str] = Field(default=None, sa_column=Column('name', String(255), comment='Phòng ban: Kỹ thuật, Kinh doanh, Bảo hành...'))
-    created_at: Optional[datetime.datetime] = Field(default=None, sa_column=Column('created_at', TIMESTAMP, server_default=text('(now())')))
-    delete_at: Optional[datetime.datetime] = Field(default=None, sa_column=Column('delete_at', TIMESTAMP))
+    session_id: Optional[str] = Field(default=None, sa_column=Column('session_id', String(255)))
+    file_name: Optional[str] = Field(default=None, sa_column=Column('file_name', String(255)))
+    file_type: Optional[str] = Field(default=None, sa_column=Column('file_type', String(100)))
+    file_size: Optional[int] = Field(default=None, sa_column=Column('file_size', Integer))
+    pac_ingest_json: Optional[str] = Field(default=None, sa_column=Column('pac_ingest_json', Text))
+    graphrag_ingest_json: Optional[str] = Field(default=None, sa_column=Column('graphrag_ingest_json', Text))
+    pac_query_json: Optional[str] = Field(default=None, sa_column=Column('pac_query_json', Text))
+    graphrag_query_json: Optional[str] = Field(default=None, sa_column=Column('graphrag_query_json', Text))
+    errors_json: Optional[str] = Field(default=None, sa_column=Column('errors_json', Text))
+    created_at: Optional[datetime.datetime] = Field(default=None, sa_column=Column('created_at', TIMESTAMP, server_default=text('CURRENT_TIMESTAMP')))
 
 
-class Messages(SQLModel, table=True):
-    __tablename__ = 'Messages'
+class ConversationHistories(SQLModel, table=True):
+    __tablename__ = 'ConversationHistories'
+    __table_args__ = (
+        Index('idx_session_id', 'session_id'),
+        Index('idx_session_time', 'session_id', 'timestamp')
+    )
 
     id: str = Field(default_factory=lambda: str(uuid6.uuid7()), sa_column=Column(CHAR(36), primary_key=True))
-    conversation_key: Optional[str] = Field(default=None, sa_column=Column('conversation_key', String(128)))
-    sender_id: Optional[str] = Field(default=None, sa_column=Column('sender_id', CHAR(36)))
-    receiver_id: Optional[str] = Field(default=None, sa_column=Column('receiver_id', CHAR(36)))
+    session_id: Optional[str] = Field(default=None, sa_column=Column('session_id', String(255)))
+    role: Optional[str] = Field(default=None, sa_column=Column('role', String(50)))
     content: Optional[str] = Field(default=None, sa_column=Column('content', Text))
-    is_read: Optional[int] = Field(default=None, sa_column=Column('is_read', TINYINT(1), server_default=text("'0'")))
-    created_at: Optional[datetime.datetime] = Field(default=None, sa_column=Column('created_at', TIMESTAMP, server_default=text('(now())')))
-    delete_at: Optional[datetime.datetime] = Field(default=None, sa_column=Column('delete_at', TIMESTAMP))
-
-
-class Tickets(SQLModel, table=True):
-    __tablename__ = 'Tickets'
-
-    id: str = Field(default_factory=lambda: str(uuid6.uuid7()), sa_column=Column(CHAR(36), primary_key=True))
-    subject: Optional[str] = Field(default=None, sa_column=Column('subject', String(255)))
-    description: Optional[str] = Field(default=None, sa_column=Column('description', Text))
-    status: Optional[TicketsStatus] = Field(default=None, sa_column=Column('status', Enum(TicketsStatus, values_callable=lambda cls: [member.value for member in cls]), server_default=text("'OPEN'")))
-    priority: Optional[TicketsPriority] = Field(default=None, sa_column=Column('priority', Enum(TicketsPriority, values_callable=lambda cls: [member.value for member in cls]), server_default=text("'MEDIUM'")))
-    category: Optional[str] = Field(default=None, sa_column=Column('category', String(100)))
-    customer_id: Optional[str] = Field(default=None, sa_column=Column('customer_id', CHAR(36)))
-    assigned_agent_id: Optional[str] = Field(default=None, sa_column=Column('assigned_agent_id', CHAR(36)))
-    dept_id: Optional[str] = Field(default=None, sa_column=Column('dept_id', CHAR(36)))
-    satisfaction_rating: Optional[int] = Field(default=None, sa_column=Column('satisfaction_rating', Integer))
-    customer_feedback: Optional[str] = Field(default=None, sa_column=Column('customer_feedback', Text))
-    attachment_url: Optional[dict] = Field(default=None, sa_column=Column('attachment_url', JSON))
-    due_date: Optional[datetime.datetime] = Field(default=None, sa_column=Column('due_date', TIMESTAMP))
-    created_at: Optional[datetime.datetime] = Field(default=None, sa_column=Column('created_at', TIMESTAMP, server_default=text('(now())')))
-    delete_at: Optional[datetime.datetime] = Field(default=None, sa_column=Column('delete_at', TIMESTAMP))
+    timestamp: Optional[datetime.datetime] = Field(default=None, sa_column=Column('timestamp', TIMESTAMP, server_default=text('CURRENT_TIMESTAMP')))

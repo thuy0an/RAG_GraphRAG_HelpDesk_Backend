@@ -78,8 +78,3 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
         except Exception:
             await session.rollback()
             raise
-
-
-def get_neo4j_session() -> Neo4jManager:
-    """Dependency để get Neo4j manager"""
-    return Neo4jManager()

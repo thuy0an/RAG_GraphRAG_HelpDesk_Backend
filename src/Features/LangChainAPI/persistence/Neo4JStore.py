@@ -1,6 +1,6 @@
 import logging
 from typing import Any, Dict, List, Optional
-from SharedKernel.persistence.Neo4jManager import Neo4jManager, get_neo4j_manager
+from SharedKernel.persistence.Neo4jManager import Neo4jManager, get_neo4j_session
 
 log = logging.getLogger(__name__)
 

@@ -3,51 +3,50 @@ import uuid
 from fastapi import Depends
 from sqlmodel.ext.asyncio.session import AsyncSession
 from src.Domain.base_entities import Accounts
-from src.Features.AuthAPI.AccountDTO import SearchAccountRequest, SearchAccountRequest
+from src.Features.AuthAPI.AccountDTO import SearchAccountRequest
 from src.SharedKernel.base.Page import Page
 from src.SharedKernel.persistence.CrudRepository import CrudRepository
 from src.SharedKernel.persistence.PersistenceManager import get_db_session
-from SharedKernel.persistence.QueryExtension import QueryExtension
 
-class UserRepository(CrudRepository[Accounts, uuid.UUID]):
+
+class AccountRepository(CrudRepository[Accounts, uuid.UUID]):
     def __init__(self, session: AsyncSession = Depends(get_db_session)):
         super().__init__(Accounts, session)
 
     async def search_accounts(self, req: SearchAccountRequest):
-        base_query = """
+        limit = req.page_size
+        offset = (req.page - 1) * req.page_size
+
+        query = """
+        SELECT a.*, COUNT(*) OVER() as total
         FROM Accounts a
-        LEFT JOIN Departments d ON a.department_id = d.id
         WHERE 1=1
+        ORDER BY a.created_at DESC
+        LIMIT :limit OFFSET :offset
         """
 
-        query = (
-            QueryExtension(base_query)
-            .paginate(req.page, req.page_size)
+        exec_result = await self.fetch_all(
+            query, {"limit": limit, "offset": offset}
         )
-
-        exec_query, params = query.build_select("a.*, d.name as department_name")
-        count_query, count_params = query.build_count()
-
-        exec_result = await self.fetch_all(exec_query, params)
-        count_result = await self.fetch_all(count_query, count_params)
+        total = exec_result[0]["total"] if exec_result else 0
 
         return Page(
             content=exec_result,
             page_number=req.page,
             page_size=req.page_size,
-            total_elements=count_result[0]['total']
+            total_elements=total,
         )
 
-    async def find_by_email(self, email: str, exclude_id: str = None) -> Optional[Dict[str, Any]]:
+    async def find_by_email(
+        self, email: str, exclude_id: str = None
+    ) -> Optional[Dict[str, Any]]:
         base_query = """
         SELECT * 
         FROM Accounts a
         WHERE a.email = :email
         """
 
-        params = {
-            "email": email
-        }
+        params = {"email": email}
 
         if exclude_id:
             base_query += " AND a.id != :exclude_id"
@@ -56,20 +55,22 @@ class UserRepository(CrudRepository[Accounts, uuid.UUID]):
         exec_result = await self.fetch_one(base_query, params)
         return exec_result
 
-    async def find_by_username(self, username: str, exclude_id: str = None) -> Optional[Dict[str, Any]]:
+    async def find_by_username(
+        self, username: str, exclude_id: str = None
+    ) -> Optional[Dict[str, Any]]:
         base_query = """
         SELECT * 
         FROM Accounts a
         WHERE a.username = :username 
         """
-        
+
         params = {
             "username": username,
         }
-        
+
         if exclude_id:
             base_query += " AND a.id != :exclude_id"
             params["exclude_id"] = exclude_id
-        
+
         exec_result = await self.fetch_one(base_query, params)
         return exec_result

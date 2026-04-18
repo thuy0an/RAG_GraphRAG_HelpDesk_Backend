@@ -10,5 +10,5 @@ class APIResponse(BaseModel, Generic[T]):
     )
 
     message: str
-    data: Optional[T] = None
+    result: Optional[T] = None
     status_code: int

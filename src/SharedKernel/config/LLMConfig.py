@@ -8,9 +8,6 @@ from src.SharedKernel.utils.yamlenv import load_env_yaml
 
 config = load_env_yaml()
 
-#
-# INTERFACE 
-# 
 class BaseLLMProvider(ABC):
     @abstractmethod
     def get_llm(self) -> BaseChatModel:
@@ -21,9 +18,6 @@ class BaseEmbeddingProvider(ABC):
     def get_embedding(self) -> Embeddings:
         pass
 
-#
-# PROVIDER
-#
 class MistralProvider(BaseLLMProvider, BaseEmbeddingProvider):
     def __init__(self) -> None:
         self.model = config.llm.mistral.model
@@ -66,9 +60,6 @@ class OllamaProvider(BaseLLMProvider, BaseEmbeddingProvider):
             base_url=self.host
         )
 
-#
-# REGISTRY
-#
 class ProviderRegistry:
     _providers: Dict[str, Type] = {}
 
@@ -83,9 +74,6 @@ class ProviderRegistry:
             raise ValueError(f"Provider '{name}' not found")
         return provider()
 
-#
-# FACTORY
-# 
 class LLMFactory:
     @staticmethod
     def create(provider_name: str) -> BaseChatModel:

@@ -5,9 +5,16 @@ from SharedKernel.utils.yamlenv import load_env_yaml
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import text
 from SharedKernel.persistence.PersistenceManager import get_db_session
-from SharedKernel.persistence.Neo4jManager import get_neo4j_manager, Neo4jManager
+from SharedKernel.persistence.Neo4jManager import get_neo4j_session, Neo4jManager
 from SharedKernel.config.LLMConfig import LLMFactory, EmbeddingFactory
+from pydantic import BaseModel
+import asyncio
+import time
 config = load_env_yaml()
+
+class ConcurrentTestRequest(BaseModel):
+    prompts: list[str]
+    num_requests: int = 5
 
 @Controller
 class SharedKernelController:
@@ -25,17 +32,17 @@ class SharedKernelController:
                 return APIResponse(
                     message="Database is healthy",
                     status_code=status.HTTP_200_OK,
-                    data={"status": "healthy"},
+                    result={"status": "healthy"},
                 )
             except Exception as e:
                 return APIResponse(
                     message="Database is unhealthy",
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    data={"status": "unhealthy", "error": str(e)},
+                    result={"status": "unhealthy", "error": str(e)},
                 )
 
         @self.router.get("/neo4j")
-        def check_neo4j_health(neo4j_mgr: Neo4jManager = Depends(get_neo4j_manager)):
+        def check_neo4j_health(neo4j_mgr: Neo4jManager = Depends(get_neo4j_session)):
             try:
                 is_healthy = neo4j_mgr.verify_connectivity()
                 if is_healthy:
@@ -54,7 +61,7 @@ class SharedKernelController:
                 return APIResponse(
                     message="Neo4j is unhealthy",
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    data={"status": "unhealthy", "error": str(e)},
+                    result={"status": "unhealthy", "error": str(e)},
                 )
 
         @self.router.get("/llm")
@@ -68,7 +75,7 @@ class SharedKernelController:
                 return APIResponse(
                     message="LLM is healthy",
                     status_code=status.HTTP_200_OK,
-                    data={
+                    result={
                         "status": "healthy",
                         "provider": provider_name,
                         "model": config.llm.get(provider_name, {}).get("model")
@@ -85,7 +92,7 @@ class SharedKernelController:
                 return APIResponse(
                     message="LLM is unhealthy",
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    data={"status": "unhealthy", "error": str(e)},
+                    result={"status": "unhealthy", "error": str(e)},
                 )
 
         @self.router.get("/embedding")
@@ -112,5 +119,5 @@ class SharedKernelController:
                 return APIResponse(
                     message="Embedding is unhealthy",
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    data={"status": "unhealthy", "error": str(e)},
+                    result={"status": "unhealthy", "error": str(e)},
                 )

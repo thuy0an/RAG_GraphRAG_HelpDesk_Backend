@@ -6,7 +6,6 @@ from fastapi import UploadFile
 from src.SharedKernel.base.Metrics import Metrics
 from src.Features.LangChainAPI.RAG.Loader import Loader
 from src.Features.LangChainAPI.RAG.Process import Process
-from src.Features.LangChainAPI.persistence.MemoryRepository import MemoryRepository
 
 
 class BaseRAG(ABC):
@@ -19,7 +18,6 @@ class BaseRAG(ABC):
         self.embedding = embedding
         self.loader = Loader()
         self.process = Process()
-        self.memory_repo = MemoryRepository()
 
     @abstractmethod
     async def index(self, file: UploadFile, **kwargs) -> None:

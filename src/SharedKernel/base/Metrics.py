@@ -1,9 +1,9 @@
-import logging
 from time import perf_counter
 from typing import Dict, Any
 from contextlib import contextmanager
+from src.SharedKernel.base.Logger import get_logger
 
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 class Metrics:
     """Metrics collector for RAG pipeline stages"""

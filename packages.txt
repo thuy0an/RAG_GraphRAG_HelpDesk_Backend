@@ -1,7 +1,6 @@
 # http
 fastapi
 scalar-fastapi
-lagom
 # database
 sqlacodegen
 sqlmodel
@@ -20,7 +19,8 @@ langchain-core
 langchain-redis 
 rank-bm25
 langchain-classic
-langchain-neo4j
+langchain_neo4j
+neo4j
 # security
 bcrypt
 pyjwt
@@ -35,6 +35,7 @@ trafilatura
 langchain-unstructured
 unstructured[pdf]
 langchain-text-splitters
+pymupdf
 # loader
 granian
 redis

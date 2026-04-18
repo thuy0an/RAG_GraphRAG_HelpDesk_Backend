@@ -8,11 +8,12 @@ from typing import List
 import uuid6
 from fastapi import Depends, UploadFile, status
 from src.Features.LangChainAPI.LangChainFacade import LangChainFacade
-from src.Domain.base_entities import Attachment
+from src.Domain.base_entities import Attachments
 from SharedKernel.exception.APIException import APIException
 from SharedKernel.base.Logger import get_logger
 from src.Features.RealTimeAPI.FileSystem.StorageRepository import FileRepository
 from src.Features.RealTimeAPI.FileSystem.FileDTO import FileSearchRequest
+from src.Features.RealTimeAPI.FileSystem.ChunkedUploadDTO import ChunkedUploadRequest, ChunkedUploadResponse
 from src.SharedKernel.utils.yamlenv import load_env_yaml
 
 log = get_logger(__name__)
@@ -36,12 +37,15 @@ class StorageService:
         overwritten_files = []
         
         for file in files:
+            # Access filename before file operations
+            filename = file.filename
+            
             # Check existing file by name
-            existing_file = await self.file_repo.find_by_filename(file.filename)
+            existing_file = await self.file_repo.find_by_filename(filename)
             print(existing_file)
 
             if existing_file:
-                log.info(f"Found existing file: {file.filename}, deleting...")
+                log.info(f"Found existing file: {filename}, deleting...")
                 
                 # Delete from filesystem
                 old_file_path = self._get_file_path(str(existing_file['id']), existing_file['file_name'])
@@ -51,11 +55,11 @@ class StorageService:
                 
                 # Soft delete from database
                 existing_file['delete_at'] = datetime.datetime.now()
-                await file_repo.soft_delete_by_filename(file.filename)
-                overwritten_files.append(file.filename)
+                await self.file_repo.soft_delete_by_filename(filename)
+                overwritten_files.append(filename)
             
             # Save new file
-            attachment = Attachment()
+            attachment = Attachments()
             new_id = uuid6.uuid7()
             file_name = os.path.splitext(file.filename)[0]
             file_ext = os.path.splitext(file.filename)[1]
@@ -67,10 +71,9 @@ class StorageService:
             with open(file_path, "wb") as f:
                 f.write(content)
 
-            if file_ext.lower() == ".pdf":
-                # Reset con trỏ file về đầu để index
-                await file.seek(0)
-                await self.langfacade.PaCRAG.index(file)
+            # Reset con trỏ file về đầu để index
+            await file.seek(0)
+            await self.langfacade.PaCRAG.index(file)
 
             attachment.id = new_id
             attachment.file_name = filename
@@ -88,6 +91,94 @@ class StorageService:
             "urls": attachment_urls,
             "overwritten": overwritten_files
         }
+    
+    async def save_files_with_chunking(
+        self, 
+        files: List[UploadFile],
+        parent_chunk_size=None,
+        parent_chunk_overlap=None,
+        child_chunk_size=None,
+        child_chunk_overlap=None
+    ) -> ChunkedUploadResponse:
+        """Save files with chunking parameters and pass to indexing"""
+        attachments_files = []
+        indexing_results = []
+
+        chunk_params = {
+            "parent_chunk_size": parent_chunk_size,
+            "parent_chunk_overlap": parent_chunk_overlap,
+            "child_chunk_size": child_chunk_size,
+            "child_chunk_overlap": child_chunk_overlap
+        }
+        
+        for file in files:
+            # Access filename before file operations
+            filename = file.filename
+            
+            # Check if file exists in static folder and delete it
+            existing_file = await self.file_repo.find_by_filename(filename)
+            if existing_file:
+                log.info(f"Found existing file: {filename}, deleting...")
+                
+                # Delete from filesystem
+                old_file_path = self._get_file_path(str(existing_file['id']), existing_file['file_name'])
+                if os.path.exists(old_file_path):
+                    os.remove(old_file_path)
+                    log.info(f"Deleted file from disk: {old_file_path}")
+                
+                # Soft delete from database
+                existing_file['delete_at'] = datetime.datetime.now()
+                await self.file_repo.soft_delete_by_filename(filename)
+            
+            # Save new file
+            file_result = await self._save_single_file(file)
+            attachments_files.append(file_result)
+            
+            # Reset file pointer and index with chunk parameters
+            await file.seek(0)
+            indexing_result = await self.langfacade.PaCRAG.index_with_kwargs(
+                file, 
+                parent_chunk_size=parent_chunk_size,
+                parent_chunk_overlap=parent_chunk_overlap,
+                child_chunk_size=child_chunk_size,
+                child_chunk_overlap=child_chunk_overlap
+            )
+            indexing_results.append(indexing_result)
+        
+        return ChunkedUploadResponse(
+            uploaded_files=attachments_files,
+            indexing_results=indexing_results,
+            chunk_parameters=chunk_params
+        )
+    
+    async def _save_single_file(self, file: UploadFile) -> dict:
+        """Save a single file and return file information"""
+        attachment = Attachments()
+        new_id = uuid6.uuid7()
+        
+        # Access filename before reading content
+        file_name = os.path.splitext(file.filename)[0]
+        file_ext = os.path.splitext(file.filename)[1]
+        filename = f"{file_name}{file_ext}"
+        
+        file_path = self._get_file_path(str(new_id), filename)
+        
+        content = await file.read()
+        with open(file_path, "wb") as f:
+            f.write(content)
+        
+        attachment.id = new_id
+        attachment.file_name = filename
+        attachment.url = f"http://{config.app.host}:{config.app.port}/{self.STORAGE_PREFIX}/{new_id}/{filename}"
+        
+        await self.file_repo.save(attachment)
+        
+        return {
+            "id": new_id,
+            "file_name": filename,
+            "url": attachment.url,
+            "size": len(content)
+        }
             
     async def get_file_by_id(self, file_id: str, file_name: str = None):
         file = await self.file_repo.find_by_id(file_id)
@@ -96,6 +187,7 @@ class StorageService:
 
         if file_name and file.file_name != file_name:
             raise APIException("File name mismatch", status_code=status.HTTP_400_BAD_REQUEST)
+            
         file_name = file.file_name
         file_path = self._get_file_path(file_id, file_name)
         
@@ -118,27 +210,22 @@ class StorageService:
                 status_code=status.HTTP_404_NOT_FOUND
             )
         
-        referencing_messages = await self.file_repo.fetch_all(
+        referencing_histories = await self.file_repo.fetch_all(
             """
-            SELECT * 
-            FROM Messages m 
-            WHERE m.content LIKE :file_id_pattern
-            AND m.delete_at IS NULL
+            SELECT *
+            FROM ConversationHistories
+            WHERE content LIKE :file_id_pattern
             """,
             {"file_id_pattern": f"%{file_id}%"}
         )
 
-        for message in referencing_messages:
+        for history in referencing_histories:
             await self.file_repo.execute(
                 """
-                UPDATE Messages 
-                SET delete_at = :delete_now 
-                WHERE id = :message_id
+                DELETE FROM ConversationHistories
+                WHERE id = :history_id
                 """,
-                {
-                    "delete_now": datetime.datetime.now(),
-                    "message_id": message['id']
-                }
+                {"history_id": history['id']}
             )
         
         folder_path = os.path.join("./static", file_id) 
@@ -150,6 +237,7 @@ class StorageService:
         await self.file_repo.save(file)
 
         await self.langfacade.PaCRAG.delete(file.file_name)
+        await self.langfacade.GraphRAG.delete(file.file_name)
 
     def _get_file_path(self, folder_storage: str, filename: str):
         full_path = os.path.join("./static", folder_storage, filename)

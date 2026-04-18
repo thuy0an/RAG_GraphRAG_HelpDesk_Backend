@@ -20,7 +20,6 @@ def Transaction(func: Callable) -> Callable:
     async def wrapper(self, *args, **kwargs) -> Any:
         try:
             result = await func(self, *args, **kwargs)
-            # await self.session.commit()
             print(f"Transaction committed - Session ID: {id(self.session)}")
             return result
         except Exception as e:
