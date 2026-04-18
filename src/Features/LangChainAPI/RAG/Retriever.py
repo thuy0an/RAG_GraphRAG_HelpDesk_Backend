@@ -1,5 +1,6 @@
 from collections import defaultdict
 import json
+from typing import List, Optional
 from redisvl.query import TextQuery, VectorQuery
 from src.SharedKernel.base.Metrics import Metrics
 from SharedKernel.persistence.RedisConnectionManager import get_redis_manager
@@ -26,22 +27,76 @@ class HybridRetriever:
             self._store = self._manager.get_store(self.redis_url)
         return self._store
 
-    async def retriever(self, query: str, k: int = 5):
+    def _escape_tag_value(self, value: str) -> str:
+        """
+        Escape special characters in Redis TAG filter values.
+        Redis TAG fields treat comma as separator; spaces and special chars
+        in filenames need to be escaped with backslash.
+        """
+        # Characters that need escaping in Redis tag queries
+        special_chars = r',.<>{}[]"\'|&~!@#$%^*()-+=/ '
+        escaped = ""
+        for ch in value:
+            if ch in special_chars:
+                escaped += f"\\{ch}"
+            else:
+                escaped += ch
+        return escaped
+
+    def _build_filter_expression(
+        self,
+        source_filter: Optional[str] = None,
+        source_filters: Optional[List[str]] = None,
+    ) -> Optional[str]:
+        """
+        Build Redis filter expression for source filtering.
+        - source_filter: single file name (backward compat)
+        - source_filters: list of file names → OR expression
+        TAG fields require escaping special chars (spaces, dashes, etc.)
+        """
+        sources = []
+        if source_filters:
+            sources.extend(source_filters)
+        elif source_filter:
+            sources.append(source_filter)
+
+        if not sources:
+            return None
+
+        if len(sources) == 1:
+            escaped = self._escape_tag_value(sources[0])
+            return f"@source:{{{escaped}}}"
+
+        # Multiple sources: (@source:{escaped_a} | @source:{escaped_b})
+        parts = " | ".join(f"@source:{{{self._escape_tag_value(s)}}}" for s in sources)
+        return f"({parts})"
+
+    async def retriever(
+        self,
+        query: str,
+        k: int = 5,
+        source_filter: Optional[str] = None,
+        source_filters: Optional[List[str]] = None,
+    ):
         query_embed = await self.embeddings.aembed_query(query)
         print(len(query_embed))
+
+        filter_expr = self._build_filter_expression(source_filter, source_filters)
 
         vector_query = VectorQuery(
             vector=query_embed,
             vector_field_name="embedding",
             num_results=k,
-            return_fields=["_metadata_json", "text"]
+            return_fields=["_metadata_json", "text"],
+            filter_expression=filter_expr,
         )
 
         bm25_query = TextQuery(
             text=query,
             text_field_name="text",
             num_results=k,
-            return_fields=["_metadata_json", "text"]
+            return_fields=["_metadata_json", "text"],
+            filter_expression=filter_expr,
         )
 
         vector_docs = self.index.query(vector_query)

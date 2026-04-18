@@ -12,6 +12,7 @@ from src.Features.LangChainAPI.RAG.BaseRAG import BaseRAG
 from src.Features.LangChainAPI.persistence.Neo4JStore import Neo4JStore
 from src.Features.LangChainAPI.RAG.GraphRAGInternal import GraphRAGInternal
 from src.Features.LangChainAPI.prompt import format_history_block
+from src.Features.LangChainAPI.RAG.ConfidenceScorer import ConfidenceScorer
 from SharedKernel.threading.ThreadPoolManager import ThreadPoolManager
 
 log = logging.getLogger(__name__)
@@ -199,6 +200,16 @@ class GraphRAG(BaseRAG):
         result = await self.retrieve(query, source=source, **kwargs)
         total_time = time.perf_counter() - start
         answer = result.get("answer", "")
+
+        # Confidence scoring
+        confidence_score = None
+        try:
+            context_text = " ".join([p.get("content", "") for p in result.get("doc_passages", [])])
+            scorer = ConfidenceScorer(self.provider)
+            confidence_score = await scorer.score(query, context_text, answer)
+        except Exception as e:
+            log.warning(f"Confidence scoring failed: {e}")
+
         return {
             "answer": answer,
             "sources": result.get("sources", []),
@@ -208,6 +219,7 @@ class GraphRAG(BaseRAG):
             "word_count": len(answer.split()),
             "retrieved_chunk_count": result.get("retrieved_chunk_count", 0),
             "doc_passages": result.get("doc_passages", []),
+            "confidence_score": confidence_score,
         }
 
     async def delete(self, identifier: str, **kwargs) -> None:
@@ -225,3 +237,66 @@ class GraphRAG(BaseRAG):
     async def clear_history(self, session_id: str) -> int:
         """Clear GraphRAG chat history for a session. Returns deleted count."""
         return await self.memory_repo.delete_session_history(session_id)
+
+    async def multi_hop_retrieve(self, query: str, max_hops: int = 2) -> dict:
+        """Multi-hop reasoning: retrieve in multiple hops, merging context."""
+        import time
+        start = time.perf_counter()
+
+        all_doc_passages: list = []
+        seen_contents: set = set()
+        hop_count = 0
+
+        def _merge_passages(new_passages: list) -> int:
+            """Add new passages, dedup by content. Returns count of new passages added."""
+            added = 0
+            for p in new_passages:
+                content = p.get("content", "")
+                if content and content not in seen_contents:
+                    seen_contents.add(content)
+                    all_doc_passages.append(p)
+                    added += 1
+            return added
+
+        # Hop 1: retrieve with original query
+        result_hop1 = await self.retrieve(query)
+        hop_count = 1
+        entities_hop1 = result_hop1.get("entities", [])
+        _merge_passages(result_hop1.get("doc_passages", []))
+
+        # Hop 2: use entities from hop 1 as sub-query
+        if max_hops >= 2 and entities_hop1:
+            hop2_query = " ".join(entities_hop1[:5])
+            result_hop2 = await self.retrieve(hop2_query)
+            new_added = _merge_passages(result_hop2.get("doc_passages", []))
+            if new_added > 0:
+                hop_count = 2
+
+        # Generate final answer with merged context
+        final_answer = result_hop1.get("answer", "")
+        if hop_count == 2 and all_doc_passages:
+            try:
+                # Build a new prompt with merged passages
+                merged_prompt = self.internal.build_answer_prompt(
+                    doc_summary_parts=[],
+                    section_summaries=[],
+                    graph_facts=[],
+                    doc_passages=all_doc_passages[:10],
+                    question=query,
+                )
+                response = self.provider.invoke(merged_prompt)
+                final_answer = response.content.strip() if hasattr(response, "content") else str(response).strip()
+            except Exception as e:
+                log.warning(f"Multi-hop final generation failed, using hop1 answer: {e}")
+
+        total_time = time.perf_counter() - start
+        sources = result_hop1.get("sources", [])
+
+        return {
+            "answer": final_answer,
+            "hop_count": hop_count,
+            "sources": sources,
+            "doc_passages": all_doc_passages[:10],
+            "time_total_s": round(total_time, 2),
+            "entities": entities_hop1,
+        }

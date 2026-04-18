@@ -1,12 +1,14 @@
 import logging
 import time
-from typing import Any, Dict, List, AsyncGenerator
+from typing import Any, Dict, List, Optional, AsyncGenerator
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain.embeddings import Embeddings
 from fastapi import UploadFile
 from SharedKernel.base.Metrics import Metrics
 from Features.LangChainAPI.RAG.BaseRAG import BaseRAG
+from Features.LangChainAPI.RAG.LLMReranker import LLMReranker
+from Features.LangChainAPI.RAG.ConfidenceScorer import ConfidenceScorer
 from Features.LangChainAPI.persistence.RedisVSRepository import RedisVSRepository
 from SharedKernel.config.LLMConfig import EmbeddingFactory
 from Features.LangChainAPI.prompt import PaC_template, PaC_template_with_history, format_history_block
@@ -17,10 +19,13 @@ class PaCRAG(BaseRAG):
     def __init__(
         self,
         provider: BaseChatModel,
-        embedding: Embeddings
+        embedding: Embeddings,
+        enable_reranking: bool = False,
     ) -> None:
         super().__init__(provider, embedding)
         self._redis_vs_repo = None
+        self.enable_reranking = enable_reranking
+        self._reranker = LLMReranker(provider) if enable_reranking else None
 
     @property
     def redis_vs_repo(self):
@@ -81,6 +86,9 @@ class PaCRAG(BaseRAG):
         session_id: str = None,
         turn_id: str = None,
         save_user_message: bool = True,
+        source_filter: Optional[str] = None,
+        source_filters: Optional[List[str]] = None,
+        enable_reranking: Optional[bool] = None,
         **kwargs
     ) -> AsyncGenerator[str, None]:
         """Retrieve documents và generate response với streaming. Không tự lưu history."""
@@ -101,9 +109,16 @@ class PaCRAG(BaseRAG):
             log.debug("Conversation history disabled (limit=0)")
 
         with metrics.stage("hybrid_retrieval"):
-            hybrid_docs = await self.redis_vs_repo.hybrid_retriver(query=query, k=5)
+            hybrid_docs = await self.redis_vs_repo.hybrid_retriver(query=query, k=5, source_filter=source_filter, source_filters=source_filters)
             print(hybrid_docs)
         metrics.increment("retrieved_docs", len(hybrid_docs))
+
+        # Re-ranking (optional)
+        _do_rerank = enable_reranking if enable_reranking is not None else self.enable_reranking
+        if _do_rerank and hybrid_docs:
+            if self._reranker is None:
+                self._reranker = LLMReranker(self.provider)
+            hybrid_docs, _, _ = await self._reranker.rerank(query, hybrid_docs, top_k=5)
 
         if not hybrid_docs:
             answer = "Không tìm thấy tài liệu liên quan. Vui lòng upload tài liệu trước hoặc đặt câu hỏi cụ thể hơn."
@@ -135,15 +150,29 @@ class PaCRAG(BaseRAG):
         query: str,
         session_id: str = None,
         turn_id: str = None,
-        save_user_message: bool = True
+        save_user_message: bool = True,
+        source_filter: Optional[str] = None,
+        source_filters: Optional[List[str]] = None,
+        enable_reranking: Optional[bool] = None,
     ) -> Dict[str, Any]:
         """Non-streaming version. Không tự lưu history."""
         metrics = Metrics("RetrieverFull")
         start = time.perf_counter()
 
         with metrics.stage("hybrid_retrieval"):
-            hybrid_docs = await self.redis_vs_repo.hybrid_retriver(query=query, k=5)
+            hybrid_docs = await self.redis_vs_repo.hybrid_retriver(query=query, k=5, source_filter=source_filter, source_filters=source_filters)
         metrics.increment("retrieved_docs", len(hybrid_docs))
+
+        # Re-ranking (optional)
+        reranking_scores = None
+        reranking_time_s = None
+        _do_rerank = enable_reranking if enable_reranking is not None else self.enable_reranking
+        if _do_rerank and hybrid_docs:
+            if self._reranker is None:
+                self._reranker = LLMReranker(self.provider)
+            hybrid_docs, reranking_scores, reranking_time_s = await self._reranker.rerank(
+                query, hybrid_docs, top_k=5
+            )
 
         if not hybrid_docs:
             answer = "Không tìm thấy tài liệu liên quan. Vui lòng upload tài liệu trước hoặc đặt câu hỏi cụ thể hơn."
@@ -156,6 +185,7 @@ class PaCRAG(BaseRAG):
                 "word_count": 0,
                 "retrieved_chunk_count": 0,
                 "retrieved_chunks": [],
+                "confidence_score": None,
             }
 
         with metrics.stage("context_formatting"):
@@ -170,6 +200,14 @@ class PaCRAG(BaseRAG):
         with metrics.stage("llm_generation"):
             response = chain.invoke({"query": query})
             answer = response.content if hasattr(response, "content") else str(response)
+
+        # Confidence scoring
+        confidence_score = None
+        try:
+            scorer = ConfidenceScorer(self.provider)
+            confidence_score = await scorer.score(query, context, answer)
+        except Exception as e:
+            log.warning(f"Confidence scoring failed: {e}")
 
         # Trích xuất retrieved_chunks (tối đa 10)
         retrieved_chunks = []
@@ -193,6 +231,8 @@ class PaCRAG(BaseRAG):
             "word_count": len(answer.split()),
             "retrieved_chunk_count": len(hybrid_docs),
             "retrieved_chunks": retrieved_chunks,
+            "confidence_score": confidence_score,
+            **({"reranking_scores": reranking_scores, "reranking_time_s": reranking_time_s} if reranking_scores is not None else {}),
         }
 
     async def delete(self, identifier: str, **kwargs) -> None:

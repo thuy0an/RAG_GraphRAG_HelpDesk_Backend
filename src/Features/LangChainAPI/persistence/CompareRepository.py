@@ -1,6 +1,9 @@
 import asyncio
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+
+# Vietnam timezone (UTC+7)
+_VN_TZ = timezone(timedelta(hours=7))
 import uuid6
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -60,7 +63,7 @@ class CompareRepository:
         await self._ensure_initialized()
 
         run_id = str(uuid6.uuid7())
-        created_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        created_at = datetime.now(_VN_TZ).strftime("%Y-%m-%d %H:%M:%S")
 
         query = sa_text(
             """
@@ -96,13 +99,23 @@ class CompareRepository:
         run_id: str,
         pac_query: Optional[Dict],
         graphrag_query: Optional[Dict],
+        query_text: Optional[str] = None,
     ) -> Optional[Dict]:
         await self._ensure_initialized()
+
+        # Add query_text column if not exists (migration)
+        try:
+            async with self.sqlite_engine.begin() as conn:
+                await conn.execute(sa_text("ALTER TABLE compare_runs ADD COLUMN query_text TEXT"))
+        except Exception:
+            pass  # Column already exists
+
         query = sa_text(
             """
             UPDATE compare_runs
             SET pac_query_json = :pac_query,
-                graphrag_query_json = :graphrag_query
+                graphrag_query_json = :graphrag_query,
+                query_text = :query_text
             WHERE id = :run_id
             """
         )
@@ -114,6 +127,7 @@ class CompareRepository:
                     "run_id": run_id,
                     "pac_query": json.dumps(pac_query or {}),
                     "graphrag_query": json.dumps(graphrag_query or {}),
+                    "query_text": query_text,
                 },
             )
 
@@ -177,6 +191,9 @@ class CompareRepository:
         data.setdefault("word_count", None)
         data.setdefault("doc_passages", [])
         data.setdefault("retrieved_chunks", [])
+        data.setdefault("reranking_scores", None)
+        data.setdefault("reranking_time_s", None)
+        data.setdefault("confidence_score", None)
         return data
 
     def _serialize_run(self, run: CompareRun) -> Dict:
@@ -209,6 +226,7 @@ class CompareRepository:
             "file_name": row.get("file_name"),
             "file_type": row.get("file_type"),
             "file_size": row.get("file_size"),
+            "query_text": row.get("query_text"),
             "pac_ingest": json.loads(row.get("pac_ingest_json") or "{}"),
             "graphrag_ingest": json.loads(row.get("graphrag_ingest_json") or "{}"),
             "pac_query": self._deserialize_query_json(row.get("pac_query_json")),

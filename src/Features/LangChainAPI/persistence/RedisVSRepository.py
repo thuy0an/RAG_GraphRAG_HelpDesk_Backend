@@ -1,5 +1,5 @@
 import json
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from langchain_core.documents import Document
 from redisvl.query import FilterQuery
 from SharedKernel.config.LLMConfig import EmbeddingFactory
@@ -270,10 +270,10 @@ class RedisVSRepository:
     # ============================================================
     # SEARCH/RETRIEVE OPERATIONS
     # ============================================================
-    async def hybrid_retriver(self, query: str, k: int = 5) -> List[Dict]:
+    async def hybrid_retriver(self, query: str, k: int = 5, source_filter: Optional[str] = None, source_filters: Optional[List[str]] = None) -> List[Dict]:
         hre = HybridRetriever(
             self.embeddings, 
             self.redis_url,
             connection_manager=self._manager
         )
-        return await hre.retriever(query, k)
+        return await hre.retriever(query, k, source_filter=source_filter, source_filters=source_filters)

@@ -275,6 +275,9 @@ class LangChainController:
             session_id: str
             run_id: str
             query: str
+            source_filter: Optional[str] = None
+            source_filters: Optional[List[str]] = None
+            reranking_enabled: bool = False
 
         @self.router.post("/compare/query")
         async def compare_query(
@@ -282,8 +285,10 @@ class LangChainController:
             langfacade: LangChainFacade = Depends(),
         ):
             # Chạy song song cả 2 RAG — không lưu history, frontend sẽ save sau
-            pac_task = langfacade.PaCRAG.retrieve_full(req.query)
-            graph_task = langfacade.GraphRAG.retrieve_with_metrics(req.query, source=None)
+            pac_task = langfacade.PaCRAG.retrieve_full(req.query, enable_reranking=req.reranking_enabled, source_filter=req.source_filter, source_filters=req.source_filters)
+            # GraphRAG: nếu có nhiều file → dùng file đầu tiên (GraphRAG chỉ hỗ trợ 1 source)
+            graph_source = req.source_filter or (req.source_filters[0] if req.source_filters else None)
+            graph_task = langfacade.GraphRAG.retrieve_with_metrics(req.query, source=graph_source)
 
             pac_result, graph_result = await asyncio.gather(
                 pac_task, graph_task, return_exceptions=True
@@ -318,11 +323,23 @@ class LangChainController:
                     graph_metrics.get("sources", []),
                     graph_metrics.get("retrieved_chunk_count", 0)
                 )
+                if req.reranking_enabled:
+                    from Features.LangChainAPI.RAG.LLMReranker import LLMReranker
+                    reranker = LLMReranker(langfacade.provider)
+                    doc_passages = graph_metrics.get("doc_passages", [])
+                    if doc_passages:
+                        reranked_passages, rr_scores, rr_time = await reranker.rerank(
+                            req.query, doc_passages, top_k=len(doc_passages)
+                        )
+                        graph_metrics["doc_passages"] = reranked_passages
+                        graph_metrics["reranking_scores"] = rr_scores
+                        graph_metrics["reranking_time_s"] = rr_time
 
             run = await compare_repo.update_query_metrics(
                 req.run_id,
                 pac_query=pac_metrics,
                 graphrag_query=graph_metrics,
+                query_text=req.query,
             )
 
             return APIResponse(
@@ -361,6 +378,8 @@ class LangChainController:
             session_id: str
             turn_id: Optional[str] = None
             save_history: bool = True
+            source_filter: Optional[str] = None
+            source_filters: Optional[List[str]] = None
 
         @self.router.post("/retrieve_document")
         async def retrieve_document(
@@ -373,6 +392,8 @@ class LangChainController:
                     session_id=req.session_id,
                     turn_id=req.turn_id,
                     save_user_message=req.save_history,
+                    source_filter=req.source_filter,
+                    source_filters=req.source_filters,
                 ):
                     if chunk:
                         yield chunk
@@ -454,6 +475,26 @@ class LangChainController:
             )
             return APIResponse(
                 message="Query completed", status_code=status.HTTP_200_OK, data=result
+            )
+
+        class GraphMultiHopRequest(BaseModel):
+            query: str
+            source: Optional[str] = None
+            max_hops: int = 2
+
+        @self.router.post("/graph/multi-hop-query")
+        async def multi_hop_query_graph(
+            req: GraphMultiHopRequest,
+            langfacade: LangChainFacade = Depends()
+        ):
+            result = await langfacade.GraphRAG.multi_hop_retrieve(
+                req.query,
+                max_hops=req.max_hops,
+            )
+            return APIResponse(
+                message="Multi-hop query completed",
+                status_code=status.HTTP_200_OK,
+                data=result,
             )
 
         @self.router.delete("/graph/{source}")

@@ -14,9 +14,12 @@ Flow:
 """
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional
 from pathlib import Path
+
+# Vietnam timezone (UTC+7)
+_VN_TZ = timezone(timedelta(hours=7))
 
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncEngine
 from sqlmodel import SQLModel
@@ -69,7 +72,7 @@ class MemoryRepository:
         """
         await self._ensure_initialized()
         turn_id = str(uuid6.uuid7())
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        now = datetime.now(_VN_TZ).strftime("%Y-%m-%d %H:%M:%S")
 
         async with self.sqlite_engine.begin() as conn:
             await conn.execute(
