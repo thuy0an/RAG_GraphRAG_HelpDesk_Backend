@@ -40,45 +40,54 @@ class PaCRAG(BaseRAG):
     async def index_with_metrics(self, file: UploadFile, **kwargs) -> Dict:
         metrics = Metrics("Index PDF")
         start = time.perf_counter()
+        try:
+            with metrics.stage("delete_existing"):
+                await self.redis_vs_repo.delete_documents_by_metadata(
+                    {"source": file.filename}
+                )
 
-        with metrics.stage("delete_existing"):
-            await self.redis_vs_repo.delete_documents_by_metadata(
-                {"source": file.filename}
-            )
+            with metrics.stage("load_document"):
+                docs = await self.loader.load_file(file)
 
-        with metrics.stage("load_document"):
-            docs = await self.loader.load_file(file)
+            if not docs:
+                return {
+                    "time_total_s": 0,
+                    "parent_chunks": 0,
+                    "child_chunks": 0,
+                }
 
-        if not docs:
+            with metrics.stage("split_pac"):
+                chunks = await self.process.split_PaC(
+                    docs,
+                    parent_chunk_size=kwargs.get("parent_chunk_size"),
+                    parent_chunk_overlap=kwargs.get("parent_chunk_overlap"),
+                    child_chunk_size=kwargs.get("child_chunk_size"),
+                    child_chunk_overlap=kwargs.get("child_chunk_overlap"),
+                )
+
+            with metrics.stage("add_documents"):
+                await self.redis_vs_repo.add_PaC_documents(chunks)
+
+            metrics.log_summary()
+            total_time = time.perf_counter() - start
+
+            parent_count = len(chunks.get("parent", [])) if isinstance(chunks, dict) else 0
+            child_count = len(chunks.get("children", [])) if isinstance(chunks, dict) else 0
+
             return {
-                "time_total_s": 0,
-                "parent_chunks": 0,
-                "child_chunks": 0,
+                "time_total_s": round(total_time, 2),
+                "parent_chunks": parent_count,
+                "child_chunks": child_count,
             }
-
-        with metrics.stage("split_pac"):
-            chunks = await self.process.split_PaC(
-                docs,
-                parent_chunk_size=kwargs.get("parent_chunk_size"),
-                parent_chunk_overlap=kwargs.get("parent_chunk_overlap"),
-                child_chunk_size=kwargs.get("child_chunk_size"),
-                child_chunk_overlap=kwargs.get("child_chunk_overlap"),
+        except Exception:
+            log.error(
+                "PaCRAG ingest failed for %s",
+                file.filename or "<unknown>",
+                exc_info=True,
             )
-
-        with metrics.stage("add_documents"):
-            await self.redis_vs_repo.add_PaC_documents(chunks)
-
-        metrics.log_summary()
-        total_time = time.perf_counter() - start
-
-        parent_count = len(chunks.get("parent", [])) if isinstance(chunks, dict) else 0
-        child_count = len(chunks.get("children", [])) if isinstance(chunks, dict) else 0
-
-        return {
-            "time_total_s": round(total_time, 2),
-            "parent_chunks": parent_count,
-            "child_chunks": child_count,
-        }
+            metrics.increment("error_count", 1)
+            metrics.log_summary()
+            raise
 
     async def retrieve(
         self,
@@ -138,10 +147,15 @@ class PaCRAG(BaseRAG):
 
         with metrics.stage("llm_generation"):
             answer_parts = []
-            async for chunk in chain.astream({"query": query}):
-                if hasattr(chunk, "content"):
-                    answer_parts.append(chunk.content)
-                    yield chunk.content
+            try:
+                async for chunk in chain.astream({"query": query}):
+                    if hasattr(chunk, "content"):
+                        answer_parts.append(chunk.content)
+                        yield chunk.content
+            except Exception as e:
+                log.error(f"LLM streaming failed: {e}")
+                yield "Lỗi khi sinh câu trả lời. Vui lòng thử lại."
+                return
         metrics.increment("answer_tokens", len("".join(answer_parts).split()))
         metrics.log_summary()
 
@@ -198,7 +212,7 @@ class PaCRAG(BaseRAG):
             chain = prompt | self.provider
 
         with metrics.stage("llm_generation"):
-            response = chain.invoke({"query": query})
+            response = await chain.ainvoke({"query": query})
             answer = response.content if hasattr(response, "content") else str(response)
 
         # Confidence scoring

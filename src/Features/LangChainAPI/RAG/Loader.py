@@ -6,7 +6,7 @@ import aiofiles.os
 from fastapi import UploadFile
 from langchain_community.document_loaders import (
     PlaywrightURLLoader,
-    UnstructuredPDFLoader,
+    PyMuPDFLoader,
     Docx2txtLoader,
 )
 from langchain_core.documents import Document
@@ -64,7 +64,7 @@ class Loader:
 
         logger.info(f"DOCUMENT LOADER\nFile:  {file.filename}\nType:  {suffix}\nSize:  {file_size_kb:.1f} KB")
 
-        loader = UnstructuredPDFLoader(temp_path, mode="paged", strategy="fast")
+        loader = PyMuPDFLoader(temp_path)
         documents = loader.load()
 
         formatted_docs = []

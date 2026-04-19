@@ -86,6 +86,10 @@ class RedisVSRepository:
                 "content_length": len(chunk.page_content)
             })
 
+            # Lưu toàn bộ metadata dưới dạng JSON string để Retriever có thể đọc lại
+            import json as _json
+            metadata["_metadata_json"] = _json.dumps(metadata)
+
             documents.append(Document(
                 page_content=chunk.page_content,
                 metadata=metadata

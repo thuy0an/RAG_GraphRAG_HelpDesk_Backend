@@ -3,14 +3,11 @@ import numpy as np
 from typing import List, Optional
 from pydantic import BaseModel
 from Features.LangChainAPI.LangChainFacade import LangChainFacade
-from Features.LangChainAPI.LangTools import LangTools
-from SharedKernel.config.LLMConfig import LLMFactory
 import asyncio
 import io
 from fastapi import APIRouter, Depends, FastAPI, File, UploadFile, status, Form, Query
 from starlette.datastructures import Headers
 from fastapi.responses import StreamingResponse
-from Features.LangChainAPI.LangChainDTO import ChatRequest
 from SharedKernel.persistence.Decorators import Controller
 from src.SharedKernel.base.APIResponse import APIResponse
 from src.Features.LangChainAPI.persistence.CompareRepository import CompareRepository
@@ -46,8 +43,6 @@ class LangChainController:
     def __init__(self, app: FastAPI) -> None:
         self.app = app
         self.router = APIRouter(prefix="/api/v1/langchain", tags=["LangChain"])
-        self.tool_router = APIRouter(prefix="/api/v1/tools", tags=["Tools"])
-        self.tools = LangTools()
         self.register_route()
         self.app.include_router(self.router)
 
@@ -242,12 +237,14 @@ class LangChainController:
 
                 errors = {}
                 if isinstance(pac_result, Exception):
+                    log.error(f"PaCRAG ingest failed for {file.filename}: {pac_result}", exc_info=pac_result)
                     errors["pac"] = str(pac_result)
                     pac_metrics = {}
                 else:
                     pac_metrics = pac_result
 
                 if isinstance(graph_result, Exception):
+                    log.error(f"GraphRAG ingest failed for {file.filename}: {graph_result}", exc_info=graph_result)
                     errors["graphrag"] = str(graph_result)
                     graph_metrics = {}
                 else:
@@ -263,7 +260,10 @@ class LangChainController:
                     errors=errors or None,
                 )
 
-                results.append(run)
+                results.append({
+                    **run,
+                    "_upload_errors": errors or None,
+                })
 
             return APIResponse(
                 message="Comparison ingest completed",
@@ -290,6 +290,7 @@ class LangChainController:
                 req.query,
                 source=req.source_filter,
                 source_filters=req.source_filters,
+                enable_reranking=req.reranking_enabled,
             )
 
             pac_result, graph_result = await asyncio.gather(
@@ -325,17 +326,6 @@ class LangChainController:
                     graph_metrics.get("sources", []),
                     graph_metrics.get("retrieved_chunk_count", 0)
                 )
-                if req.reranking_enabled:
-                    from Features.LangChainAPI.RAG.LLMReranker import LLMReranker
-                    reranker = LLMReranker(langfacade.provider)
-                    doc_passages = graph_metrics.get("doc_passages", [])
-                    if doc_passages:
-                        reranked_passages, rr_scores, rr_time = await reranker.rerank(
-                            req.query, doc_passages, top_k=len(doc_passages)
-                        )
-                        graph_metrics["doc_passages"] = reranked_passages
-                        graph_metrics["reranking_scores"] = rr_scores
-                        graph_metrics["reranking_time_s"] = rr_time
 
             run = await compare_repo.create_query_run(
                 req.run_id,
@@ -397,16 +387,20 @@ class LangChainController:
             langfacade: LangChainFacade = Depends()
         ):
             async def generate():
-                async for chunk in langfacade.PaCRAG.retrieve(
-                    req.query,
-                    session_id=req.session_id,
-                    turn_id=req.turn_id,
-                    save_user_message=req.save_history,
-                    source_filter=req.source_filter,
-                    source_filters=req.source_filters,
-                ):
-                    if chunk:
-                        yield chunk
+                try:
+                    async for chunk in langfacade.PaCRAG.retrieve(
+                        req.query,
+                        session_id=req.session_id,
+                        turn_id=req.turn_id,
+                        save_user_message=req.save_history,
+                        source_filter=req.source_filter,
+                        source_filters=req.source_filters,
+                    ):
+                        if chunk:
+                            yield chunk
+                except Exception as e:
+                    log.error(f"PaCRAG stream error: {e}", exc_info=True)
+                    yield f"Lỗi hệ thống: {str(e)}"
 
             return StreamingResponse(
                 generate(),
@@ -564,28 +558,3 @@ class LangChainController:
 
         ...
 
-        #
-        # TOOL 
-        #
-        @self.tool_router.post("/tool_search")
-        async def web_search(req: ChatRequest):
-            urls = await self.tools.duckduckgo_search(req.message)
-            contents = []
-            for url in urls:
-                content = await self.tools.crawl_web(url)
-                contents.append(content)
-            return contents
-
-        @self.tool_router.post("/web_fetch")
-        async def web_fetch(req: ChatRequest):
-            content = await self.tools.crawl_web(req.message)
-            return content
-
-        @self.tool_router.post("/fetch")
-        def web_asfetch(req: ChatRequest):
-            # content = await self.tools.crawl(req.message)
-            return StreamingResponse(
-                self.tools.ascrawl_web(req.message), media_type="text/event-stream"
-            )
-
-    ...

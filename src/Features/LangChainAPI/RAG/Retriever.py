@@ -87,7 +87,21 @@ class HybridRetriever:
             vector=query_embed,
             vector_field_name="embedding",
             num_results=k,
-            return_fields=["_metadata_json", "text"],
+            return_fields=[
+                "_metadata_json",
+                "text",
+                "source",
+                "language",
+                "content_type",
+                "page_number",
+                "pages",
+                "page_span",
+                "chunk_index",
+                "total_chunks",
+                "timestamp",
+                "content_length",
+                "parent_id",
+            ],
             filter_expression=filter_expr,
         )
 
@@ -95,7 +109,21 @@ class HybridRetriever:
             text=query,
             text_field_name="text",
             num_results=k,
-            return_fields=["_metadata_json", "text"],
+            return_fields=[
+                "_metadata_json",
+                "text",
+                "source",
+                "language",
+                "content_type",
+                "page_number",
+                "pages",
+                "page_span",
+                "chunk_index",
+                "total_chunks",
+                "timestamp",
+                "content_length",
+                "parent_id",
+            ],
             filter_expression=filter_expr,
         )
 
@@ -112,17 +140,46 @@ class HybridRetriever:
 
         doc_map = {}
         for doc in list(vector_docs) + list(bm25_docs):
-            metadata = json.loads(doc["_metadata_json"])
+            raw_meta = doc.get("_metadata_json")
+            if raw_meta:
+                try:
+                    metadata = json.loads(raw_meta)
+                except (json.JSONDecodeError, TypeError):
+                    metadata = {}
+            else:
+                metadata = {}
+
+            # Merge explicit fields when present to avoid missing metadata
+            for key in (
+                "source",
+                "language",
+                "content_type",
+                "page_number",
+                "pages",
+                "page_span",
+                "chunk_index",
+                "total_chunks",
+                "timestamp",
+                "content_length",
+                "parent_id",
+            ):
+                value = doc.get(key)
+                if value is not None:
+                    metadata[key] = value
 
             doc_map[doc["id"]] = {
-                "text": doc["text"],
+                "text": doc.get("text", ""),
                 "metadata": metadata
             }
 
         parent_to_children = defaultdict(list)
         for doc_id, _ in top_docs:
+            if doc_id not in doc_map:
+                continue
             metadata = doc_map[doc_id]["metadata"].copy()
-            parent_id = doc_map[doc_id]["metadata"]["parent_id"]
+            parent_id = metadata.get("parent_id", "")
+            if not parent_id:
+                continue
             parent_to_children[parent_id].append({
                 "id": doc_id, "metadata": metadata
             })

@@ -56,15 +56,18 @@ Chỉ trả về một JSON array, ví dụ: ["thực thể 1", "thực thể 2"
 Câu hỏi: {question}
 Thực thể:"""
 
-    _ANSWER_PROMPT = """Bạn là trợ lý AI chuyên nghiệp. Hãy trả lời câu hỏi bằng tiếng Việt dựa trên ngữ cảnh bên dưới.
-Nếu câu hỏi được đặt bằng tiếng Anh, hãy trả lời bằng tiếng Anh.
-Nếu không tìm thấy thông tin trong ngữ cảnh, hãy trả lời: "Tôi không có đủ thông tin về vấn đề này, vui lòng liên hệ bộ phận hỗ trợ."
-Không sử dụng bất kỳ ngôn ngữ nào khác ngoài tiếng Việt hoặc tiếng Anh.
+    _ANSWER_PROMPT = """Bạn là trợ lý AI chuyên nghiệp. Trả lời câu hỏi dựa trên ngữ cảnh bên dưới.
+Trả lời bằng tiếng Việt. Nếu câu hỏi bằng tiếng Anh, trả lời bằng tiếng Anh.
+Không sử dụng bất kỳ ngôn ngữ nào khác.
 
-Hướng dẫn trả lời:
-- Trả lời chi tiết và có cấu trúc rõ ràng.
-- Ưu tiên trình bày theo 3 phần: Tóm tắt ngắn (1-2 câu), Chi tiết (gạch đầu dòng hoặc các bước), Kết luận/ghi chú nếu cần.
-- Chỉ sử dụng thông tin trong ngữ cảnh, không suy diễn ngoài ngữ cảnh.
+Hướng dẫn:
+- Nếu câu hỏi là lời chào: chỉ chào lại ngắn gọn, không dùng ngữ cảnh.
+- Nếu là câu hỏi tiếp nối: sử dụng lịch sử hội thoại để hiểu ngữ cảnh.
+- Nếu là câu hỏi thực sự: trả lời đầy đủ dựa trên ngữ cảnh, ưu tiên dữ liệu tài liệu hơn suy diễn.
+- Sau phần trả lời, thêm nguồn theo định dạng:
+    - Nguồn: <tên file>
+    - Trang: <số trang>
+- Nếu hoàn toàn không có dữ liệu liên quan trong ngữ cảnh: trả lời "Tôi không có thông tin về vấn đề này, vui lòng liên hệ bộ phận hỗ trợ."
 
 === Tổng quan tài liệu ===
 {doc_summary}
@@ -799,14 +802,45 @@ Trả lời:"""
         else:
             history_section = ""
 
-        # Extract text content from each passage dict
-        passage_texts = [p["content"] for p in doc_passages if isinstance(p, dict) and p.get("content")]
+        # Build rich passage blocks like PaCRAG context (content + source/pages)
+        passage_blocks = []
+        for p in doc_passages:
+            if not isinstance(p, dict):
+                continue
+            content = (p.get("content") or "").replace("\n", " ").strip()
+            if not content:
+                continue
+            filename = p.get("filename") or "không xác định"
+            pages = p.get("pages") or []
+            pages_str = ", ".join([str(pg) for pg in pages]) if pages else "không xác định"
+            block = (
+                f"{content}\n"
+                f"Nguồn: {filename}\n"
+                f"Trang: {pages_str}"
+            )
+            passage_blocks.append(block)
+
+        doc_summary_text = "\n\n".join(doc_summary_parts).strip()
+        if not doc_summary_text:
+            doc_summary_text = "Không có tóm tắt tài liệu cấp cao. Hãy ưu tiên dùng các đoạn văn bản liên quan ở phần bên dưới để trả lời."
+
+        section_context_text = "\n".join(section_summaries).strip()
+        if not section_context_text:
+            section_context_text = "Không có tóm tắt theo section. Hãy suy luận trực tiếp từ các đoạn văn bản liên quan."
+
+        graph_context_text = "\n".join(graph_facts).strip()
+        if not graph_context_text:
+            graph_context_text = "Không có quan hệ thực thể rõ ràng trong đồ thị cho truy vấn này. Hãy dựa vào nội dung đoạn văn để trả lời."
+
+        doc_context_text = "\n\n---\n\n".join(passage_blocks).strip()
+        if not doc_context_text:
+            doc_context_text = "Không có đoạn văn bản liên quan để trích xuất thông tin."
 
         return self._ANSWER_PROMPT.format(
-            doc_summary="\n\n".join(doc_summary_parts) or "N/A",
-            section_context="\n".join(section_summaries) or "N/A",
-            graph_context="\n".join(graph_facts) or "No graph context found.",
-            doc_context="\n\n---\n\n".join(passage_texts),
+            doc_summary=doc_summary_text,
+            section_context=section_context_text,
+            graph_context=graph_context_text,
+            doc_context=doc_context_text,
             history_section=history_section,
             question=question,
         )

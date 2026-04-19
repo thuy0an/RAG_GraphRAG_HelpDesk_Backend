@@ -13,6 +13,7 @@ from src.Features.LangChainAPI.persistence.Neo4JStore import Neo4JStore
 from src.Features.LangChainAPI.RAG.GraphRAGInternal import GraphRAGInternal
 from src.Features.LangChainAPI.prompt import format_history_block
 from src.Features.LangChainAPI.RAG.ConfidenceScorer import ConfidenceScorer
+from src.Features.LangChainAPI.RAG.LLMReranker import LLMReranker
 from SharedKernel.threading.ThreadPoolManager import ThreadPoolManager
 
 log = logging.getLogger(__name__)
@@ -103,6 +104,7 @@ class GraphRAG(BaseRAG):
         source_filters: List[str] | None = None,
         turn_id: str = None,
         save_user_message: bool = True,
+        enable_reranking: bool | None = None,
         **kwargs
     ) -> dict:
         """Graph RAG query pipeline. Không tự lưu history."""
@@ -171,6 +173,15 @@ class GraphRAG(BaseRAG):
                     "entities": [],
                 }
 
+            reranking_scores = None
+            reranking_time_s = None
+            if enable_reranking and doc_passages:
+                with metrics.stage("reranking"):
+                    reranker = LLMReranker(self.provider)
+                    doc_passages, reranking_scores, reranking_time_s = await reranker.rerank(
+                        query, doc_passages, top_k=len(doc_passages)
+                    )
+
             with metrics.stage("extract_entities"):
                 entities = self.internal.extract_query_entities(query)
             metrics.increment("entities_count", len(entities))
@@ -196,6 +207,14 @@ class GraphRAG(BaseRAG):
                 response = self.provider.invoke(prompt)
                 answer = response.content.strip()
 
+            if doc_passages and self._is_refusal(answer):
+                with metrics.stage("fallback_generation"):
+                    fallback_prompt = self._build_fallback_prompt(query, doc_passages)
+                    response = self.provider.invoke(fallback_prompt)
+                    fallback_answer = response.content.strip() if hasattr(response, "content") else str(response).strip()
+                    if fallback_answer:
+                        answer = fallback_answer
+
             metrics.log_summary()
             log.info("GraphRAG query completed")
 
@@ -209,6 +228,10 @@ class GraphRAG(BaseRAG):
                 "entities": entities,
                 "retrieved_chunk_count": len(hits),
                 "doc_passages": doc_passages[:10],
+                **({
+                    "reranking_scores": reranking_scores,
+                    "reranking_time_s": reranking_time_s,
+                } if reranking_scores is not None else {}),
             }
 
         except Exception as e:
@@ -225,10 +248,17 @@ class GraphRAG(BaseRAG):
         source_filters: List[str] | None = None,
         turn_id: str = None,
         save_user_message: bool = True,
+        enable_reranking: bool | None = None,
         **kwargs
     ) -> dict:
         start = time.perf_counter()
-        result = await self.retrieve(query, source=source, source_filters=source_filters, **kwargs)
+        result = await self.retrieve(
+            query,
+            source=source,
+            source_filters=source_filters,
+            enable_reranking=enable_reranking,
+            **kwargs
+        )
         total_time = time.perf_counter() - start
         answer = result.get("answer", "")
 
@@ -251,7 +281,42 @@ class GraphRAG(BaseRAG):
             "retrieved_chunk_count": result.get("retrieved_chunk_count", 0),
             "doc_passages": result.get("doc_passages", []),
             "confidence_score": confidence_score,
+            **({
+                "reranking_scores": result.get("reranking_scores"),
+                "reranking_time_s": result.get("reranking_time_s"),
+            } if result.get("reranking_scores") is not None else {}),
         }
+
+    def _is_refusal(self, answer: str) -> bool:
+        if not answer:
+            return True
+        text = answer.strip().lower()
+        refusal_markers = [
+            "tôi không có đủ thông tin",
+            "không tìm thấy thông tin",
+            "không có thông tin",
+            "vui lòng liên hệ",
+            "i don't have enough information",
+            "not enough information",
+            "please contact support",
+        ]
+        return any(marker in text for marker in refusal_markers)
+
+    def _build_fallback_prompt(self, query: str, doc_passages: List[dict]) -> str:
+        passages = [
+            p.get("content", "")
+            for p in doc_passages
+            if isinstance(p, dict) and p.get("content")
+        ]
+        context = "\n\n---\n\n".join(passages)
+        return (
+            "Ban la tro ly AI. Hay tra loi cau hoi dua tren cac doan sau. "
+            "Neu chi co mot phan thong tin, tra loi phan do. "
+            "Neu hoan toan khong lien quan, tra loi: 'Khong du thong tin de tra loi.'\n\n"
+            f"Doan van:\n{context}\n\n"
+            f"Cau hoi: {query}\n\n"
+            "Tra loi:"
+        )
 
     async def delete(self, identifier: str, **kwargs) -> None:
         """Delete document graph by filename."""

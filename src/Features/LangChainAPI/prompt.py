@@ -1,9 +1,8 @@
 from langchain_core.messages import HumanMessage
 from langchain_core.prompts import PromptTemplate
 from typing import Dict, List
-from Features.LangChainAPI.LangChainDTO import ChatRequest
 
-def System_Instruction(req: ChatRequest):
+def System_Instruction(req) -> str:
   return f"""
   ## AI Instructions
 
