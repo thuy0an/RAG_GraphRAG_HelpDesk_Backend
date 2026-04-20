@@ -14,6 +14,7 @@ Hệ thống RAG (Retrieval-Augmented Generation) chatbot hỗ trợ truy vấn 
 - [Cấu trúc thư mục](#cấu-trúc-thư-mục)
 - [API Endpoints](#api-endpoints)
 - [Chạy tests](#chạy-tests)
+- [Giấy phép](#giấy-phép)
 
 ---
 
@@ -312,3 +313,12 @@ venv\Scripts\python.exe -m pytest src/tests/test_memory_repository.py src/tests/
 ```
 
 > **Lưu ý:** Hai test suite cần hai môi trường khác nhau vì `langchain` và `sqlmodel` chưa được cài chung vào một venv. Để chạy tất cả từ một môi trường, cài đủ packages vào cùng một venv.
+
+---
+
+## Giấy phép
+
+Dự án được phát hành theo giấy phép **GNU General Public License v3.0 (GPL-3.0)**.
+
+- File giấy phép cấp dự án: [../LICENSE](../LICENSE)
+- Bản sao trong backend: [LICENSE](LICENSE)
