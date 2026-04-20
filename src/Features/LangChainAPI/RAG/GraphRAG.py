@@ -157,20 +157,48 @@ class GraphRAG(BaseRAG):
                     answer = "Chưa có tài liệu nào được upload vào GraphRAG. Vui lòng upload tài liệu trước."
                 else:
                     answer = f"Không tìm thấy thông tin liên quan đến câu hỏi này trong {chunk_count} chunks đã lưu. Thử đặt câu hỏi theo cách khác hoặc upload thêm tài liệu liên quan."
+                metric_snapshot = metrics.to_dict()
                 return {
                     "answer": answer,
                     "sources": [],
                     "entities": [],
+                    "graph_facts": [],
+                    "retrieved_chunk_count": 0,
+                    "doc_passages": [],
+                    "time_total_s": 0,
+                    "answer_tokens": len(answer.split()),
+                    "word_count": len(answer.split()),
+                    "confidence_score": None,
+                    "latency_breakdown": metric_snapshot.get("timings", {}),
+                    "system_metrics": {
+                        "time_total_s": 0,
+                        "answer_tokens": len(answer.split()),
+                        "word_count": len(answer.split()),
+                    },
                 }
 
             doc_passages, section_ids, doc_ids = self.internal.collect_context(hits)
             if not doc_passages:
                 metrics.increment("empty_context", 1)
                 metrics.log_summary()
+                metric_snapshot = metrics.to_dict()
                 return {
                     "answer": "Không tìm thấy thông tin liên quan trong dữ liệu đã lưu. Thử đặt câu hỏi khác hoặc upload thêm tài liệu liên quan.",
                     "sources": [],
                     "entities": [],
+                    "graph_facts": [],
+                    "retrieved_chunk_count": len(hits),
+                    "doc_passages": [],
+                    "time_total_s": 0,
+                    "answer_tokens": 0,
+                    "word_count": 0,
+                    "confidence_score": None,
+                    "latency_breakdown": metric_snapshot.get("timings", {}),
+                    "system_metrics": {
+                        "time_total_s": 0,
+                        "answer_tokens": 0,
+                        "word_count": 0,
+                    },
                 }
 
             reranking_scores = None
@@ -222,16 +250,38 @@ class GraphRAG(BaseRAG):
             sources = self.internal.collect_source_pages(hits, doc_id_list)
             if not sources and doc_passages:
                 sources = self.internal.collect_sources_from_passages(doc_passages)
+            metric_snapshot = metrics.to_dict()
             return {
                 "answer": answer,
                 "sources": sources,
                 "entities": entities,
                 "retrieved_chunk_count": len(hits),
                 "doc_passages": doc_passages[:10],
+                "graph_facts": graph_facts[:20],
+                "entity_count": len(entities),
+                "source_count": len(sources),
+                "doc_passage_count": len(doc_passages),
+                "graph_fact_count": len(graph_facts),
                 **({
                     "reranking_scores": reranking_scores,
                     "reranking_time_s": reranking_time_s,
                 } if reranking_scores is not None else {}),
+                "time_total_s": round(metric_snapshot.get("total_time", 0), 2),
+                "answer_tokens": len(answer.split()),
+                "word_count": len(answer.split()),
+                "confidence_score": None,
+                "latency_breakdown": metric_snapshot.get("timings", {}),
+                "system_metrics": {
+                    "time_total_s": round(metric_snapshot.get("total_time", 0), 2),
+                    "answer_tokens": len(answer.split()),
+                    "word_count": len(answer.split()),
+                },
+                "graph_metrics": {
+                    "entity_count": len(entities),
+                    "source_count": len(sources),
+                    "doc_passage_count": len(doc_passages),
+                    "graph_fact_count": len(graph_facts),
+                },
             }
 
         except Exception as e:
@@ -261,6 +311,8 @@ class GraphRAG(BaseRAG):
         )
         total_time = time.perf_counter() - start
         answer = result.get("answer", "")
+        latency_breakdown = result.get("latency_breakdown") or {}
+        graph_metrics = result.get("graph_metrics") or {}
 
         # Confidence scoring
         confidence_score = None
@@ -280,7 +332,24 @@ class GraphRAG(BaseRAG):
             "word_count": len(answer.split()),
             "retrieved_chunk_count": result.get("retrieved_chunk_count", 0),
             "doc_passages": result.get("doc_passages", []),
+            "graph_facts": result.get("graph_facts", []),
+            "entity_count": result.get("entity_count", len(result.get("entities", []))),
+            "source_count": result.get("source_count", len(result.get("sources", []))),
+            "doc_passage_count": result.get("doc_passage_count", len(result.get("doc_passages", []))),
+            "graph_fact_count": result.get("graph_fact_count", len(result.get("graph_facts", []))),
             "confidence_score": confidence_score,
+            "latency_breakdown": latency_breakdown,
+            "system_metrics": {
+                "time_total_s": round(total_time, 2),
+                "answer_tokens": len(answer.split()),
+                "word_count": len(answer.split()),
+            },
+            "graph_metrics": {
+                "entity_count": graph_metrics.get("entity_count", len(result.get("entities", []))),
+                "source_count": graph_metrics.get("source_count", len(result.get("sources", []))),
+                "doc_passage_count": graph_metrics.get("doc_passage_count", len(result.get("doc_passages", []))),
+                "graph_fact_count": graph_metrics.get("graph_fact_count", len(result.get("graph_facts", []))),
+            },
             **({
                 "reranking_scores": result.get("reranking_scores"),
                 "reranking_time_s": result.get("reranking_time_s"),

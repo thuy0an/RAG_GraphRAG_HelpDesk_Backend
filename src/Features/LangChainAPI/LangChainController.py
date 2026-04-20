@@ -38,6 +38,98 @@ def _compute_source_coverage(sources: list, retrieved_chunk_count: int) -> Optio
     return round(min(1.0, unique_sources / retrieved_chunk_count), 4)
 
 
+def _summarize_scores(scores: object) -> Optional[dict]:
+    if not isinstance(scores, list):
+        return None
+
+    numeric_scores = [float(score) for score in scores if isinstance(score, (int, float))]
+    if not numeric_scores:
+        return None
+
+    avg_score = sum(numeric_scores) / len(numeric_scores)
+    return {
+        "count": len(numeric_scores),
+        "avg": round(avg_score, 4),
+        "min": round(min(numeric_scores), 4),
+        "max": round(max(numeric_scores), 4),
+    }
+
+
+def _build_metric_groups(metrics: Optional[dict], query: str) -> Optional[dict]:
+    if not metrics:
+        return None
+
+    retrieved_chunk_count = int(metrics.get("retrieved_chunk_count") or 0)
+    retrieved_source_count = int(metrics.get("retrieved_source_count") or 0)
+    answer = metrics.get("answer", "")
+    latency_breakdown = metrics.get("latency_breakdown") or {}
+
+    system_metrics = dict(metrics.get("system_metrics") or {})
+    system_metrics.setdefault("time_total_s", metrics.get("time_total_s"))
+    system_metrics.setdefault("answer_tokens", metrics.get("answer_tokens"))
+    system_metrics.setdefault("word_count", metrics.get("word_count"))
+
+    relevance_score = metrics.get("relevance_score")
+    source_coverage = metrics.get("source_coverage")
+    confidence_score = metrics.get("confidence_score")
+
+    generation_metrics = {
+        "answer_length_tokens": metrics.get("answer_tokens"),
+        "word_count": metrics.get("word_count"),
+        "confidence_score": confidence_score,
+        "answer_relevance_proxy": relevance_score,
+        "faithfulness_proxy": confidence_score,
+        # Normalized proxy metrics for generation quality (0..1)
+        "faithfulness_groundedness": confidence_score,
+        "answer_relevancy": relevance_score,
+    }
+
+    if confidence_score is not None and relevance_score is not None:
+        generation_metrics["answer_correctness"] = round(
+            (float(confidence_score) + float(relevance_score)) / 2.0,
+            4,
+        )
+    else:
+        generation_metrics["answer_correctness"] = confidence_score if confidence_score is not None else relevance_score
+
+    retrieval_metrics = dict(metrics.get("retrieval_metrics") or {})
+    retrieval_metrics.setdefault("retrieved_chunk_count", retrieved_chunk_count)
+    retrieval_metrics.setdefault("retrieved_source_count", retrieved_source_count)
+    retrieval_metrics.setdefault("source_coverage", source_coverage)
+    retrieval_metrics.setdefault("source_diversity", (dict(metrics.get("retrieval_metrics") or {}).get("source_diversity")))
+    reranking_summary = _summarize_scores(metrics.get("reranking_scores"))
+    retrieval_metrics["reranking_summary"] = reranking_summary
+
+    # Standardized retriever metrics (0..1 when available)
+    retrieval_metrics["context_relevance"] = relevance_score
+    retrieval_metrics["context_recall"] = source_coverage
+    if reranking_summary and reranking_summary.get("avg") is not None:
+        avg_score = float(reranking_summary["avg"])
+        retrieval_metrics["context_precision"] = round(avg_score / 10.0, 4) if avg_score > 1 else round(avg_score, 4)
+    else:
+        retrieval_metrics["context_precision"] = source_coverage
+
+    graph_metrics = dict(metrics.get("graph_metrics") or {})
+    graph_metrics.setdefault("entity_count", len(metrics.get("entities") or []))
+    graph_metrics.setdefault("source_count", len(metrics.get("sources") or []))
+    graph_metrics.setdefault("doc_passage_count", len(metrics.get("doc_passages") or []))
+    graph_metrics.setdefault("graph_fact_count", len(metrics.get("graph_facts") or []))
+    graph_metrics["graph_density_proxy"] = round(
+        graph_metrics["graph_fact_count"] / max(graph_metrics["entity_count"], 1),
+        4,
+    )
+
+    return {
+        "answer": answer,
+        "system_metrics": system_metrics,
+        "generation_metrics": generation_metrics,
+        "retrieval_metrics": retrieval_metrics,
+        "graph_metrics": graph_metrics,
+        "latency_breakdown": latency_breakdown,
+        "system": system_metrics,
+    }
+
+
 @Controller
 class LangChainController:
     def __init__(self, app: FastAPI) -> None:
@@ -318,6 +410,7 @@ class LangChainController:
                     pac_metrics.get("retrieved_chunks", []),
                     pac_metrics.get("retrieved_chunk_count", 0)
                 )
+                pac_metrics["metric_groups"] = _build_metric_groups(pac_metrics, req.query)
 
             if graph_metrics is not None:
                 graph_answer = graph_metrics.get("answer", "")
@@ -326,6 +419,7 @@ class LangChainController:
                     graph_metrics.get("sources", []),
                     graph_metrics.get("retrieved_chunk_count", 0)
                 )
+                graph_metrics["metric_groups"] = _build_metric_groups(graph_metrics, req.query)
 
             run = await compare_repo.create_query_run(
                 req.run_id,

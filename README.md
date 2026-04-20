@@ -1,6 +1,6 @@
-# AI HelpDesk Backend
+# SmartDoc AI - Intelligent Document Q&A System (Backend)
 
-Hệ thống RAG (Retrieval-Augmented Generation) chatbot hỗ trợ khách hàng, xây dựng với FastAPI và LangChain. Hỗ trợ hai pipeline RAG song song: **PaCRAG** (Parent-Child chunking + Redis) và **GraphRAG** (Lexical Graph + Neo4j + FAISS).
+Hệ thống RAG (Retrieval-Augmented Generation) chatbot hỗ trợ truy vấn tài liệu thông minh, xây dựng với FastAPI và LangChain. Hỗ trợ hai pipeline RAG song song: **PaCRAG** (Parent-Child chunking + Redis) và **GraphRAG** (Lexical Graph + Neo4j + FAISS).
 
 ---
 

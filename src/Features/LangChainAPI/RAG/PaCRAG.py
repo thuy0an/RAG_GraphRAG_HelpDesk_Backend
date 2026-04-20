@@ -192,14 +192,21 @@ class PaCRAG(BaseRAG):
             answer = "Không tìm thấy tài liệu liên quan. Vui lòng upload tài liệu trước hoặc đặt câu hỏi cụ thể hơn."
             metrics.log_summary()
             total_time = time.perf_counter() - start
+            metric_snapshot = metrics.to_dict()
             return {
                 "answer": answer,
                 "time_total_s": round(total_time, 2),
                 "answer_tokens": len(answer.split()),
                 "word_count": 0,
                 "retrieved_chunk_count": 0,
+                "retrieved_source_count": 0,
                 "retrieved_chunks": [],
                 "confidence_score": None,
+                "latency_breakdown": metric_snapshot.get("timings", {}),
+                "system_metrics": {
+                    "time_total_s": round(total_time, 2),
+                    "answer_tokens": len(answer.split()),
+                },
             }
 
         with metrics.stage("context_formatting"):
@@ -238,14 +245,28 @@ class PaCRAG(BaseRAG):
 
         metrics.log_summary()
         total_time = time.perf_counter() - start
+        metric_snapshot = metrics.to_dict()
+        retrieved_source_count = len({chunk.get("filename", "") for chunk in retrieved_chunks if chunk.get("filename")})
         return {
             "answer": answer,
             "time_total_s": round(total_time, 2),
             "answer_tokens": len(answer.split()),
             "word_count": len(answer.split()),
             "retrieved_chunk_count": len(hybrid_docs),
+            "retrieved_source_count": retrieved_source_count,
             "retrieved_chunks": retrieved_chunks,
             "confidence_score": confidence_score,
+            "latency_breakdown": metric_snapshot.get("timings", {}),
+            "system_metrics": {
+                "time_total_s": round(total_time, 2),
+                "answer_tokens": len(answer.split()),
+                "word_count": len(answer.split()),
+            },
+            "retrieval_metrics": {
+                "retrieved_chunk_count": len(hybrid_docs),
+                "retrieved_source_count": retrieved_source_count,
+                "source_diversity": round(min(1.0, retrieved_source_count / max(len(hybrid_docs), 1)), 4),
+            },
             **({"reranking_scores": reranking_scores, "reranking_time_s": reranking_time_s} if reranking_scores is not None else {}),
         }
 

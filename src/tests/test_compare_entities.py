@@ -97,12 +97,31 @@ async def test_update_query_metrics(repo):
 
     updated = await repo.update_query_metrics(
         run_id,
-        pac_query={"answer": "PAC answer", "time_total_s": 2.1},
-        graphrag_query={"answer": "Graph answer", "time_total_s": 3.5},
+        pac_query={
+            "answer": "PAC answer",
+            "time_total_s": 2.1,
+            "latency_breakdown": {"hybrid_retrieval": 0.7, "llm_generation": 1.1},
+            "metric_groups": {
+                "retrieval_metrics": {"retrieved_chunk_count": 4, "retrieved_source_count": 2},
+                "system_metrics": {"time_total_s": 2.1},
+            },
+        },
+        graphrag_query={
+            "answer": "Graph answer",
+            "time_total_s": 3.5,
+            "latency_breakdown": {"vector_search": 0.9, "llm_generation": 1.6},
+            "metric_groups": {
+                "graph_metrics": {"entity_count": 5, "graph_fact_count": 3},
+                "generation_metrics": {"confidence_score": 0.8},
+            },
+        },
         query_text="Câu hỏi test",
     )
     assert updated is not None
     assert updated["query_text"] == "Câu hỏi test"
+    assert updated["pac_query"]["latency_breakdown"]["hybrid_retrieval"] == 0.7
+    assert updated["pac_query"]["metric_groups"]["retrieval_metrics"]["retrieved_chunk_count"] == 4
+    assert updated["graphrag_query"]["metric_groups"]["graph_metrics"]["entity_count"] == 5
 
 
 # ─────────────────────────────────────────────

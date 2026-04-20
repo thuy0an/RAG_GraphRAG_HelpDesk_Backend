@@ -75,7 +75,7 @@ menu_fzf() {
 menu_native() {
     clear
     echo -e "${BOLD}${CYAN}╔══════════════════════════════════════════╗${NC}"
-    echo -e "${BOLD}${CYAN}║${NC}     ${BOLD}AI HelpDesk - Backend Manager${NC}     ${CYAN}║${NC}"
+    echo -e "${BOLD}${CYAN}║${NC} ${BOLD}SmartDoc AI - Backend Manager${NC} ${CYAN}║${NC}"
     echo -e "${BOLD}${CYAN}╚══════════════════════════════════════════╝${NC}"
     echo ""
     
@@ -237,7 +237,7 @@ main_menu() {
     if has_fzf; then
         echo -e "${BOLD}${CYAN}Đang khởi động với fzf...${NC}"
         sleep 0.5
-        selected=$(printf '%s\n' "${MENU_LABELS[@]}" | fzf --height=20 --border --layout=reverse --prompt="AI HelpDesk > " --color=bg:#1e1e2e,fg:#cdd6f4,hl:#cba6f7,pointer:#f5c2e7,header:#89b4fa --preview="echo 'Chọn tác vụ để thực thi'")
+        selected=$(printf '%s\n' "${MENU_LABELS[@]}" | fzf --height=20 --border --layout=reverse --prompt="SmartDoc AI > " --color=bg:#1e1e2e,fg:#cdd6f4,hl:#cba6f7,pointer:#f5c2e7,header:#89b4fa --preview="echo 'Chọn tác vụ để thực thi'")
         
         for i in "${!MENU_LABELS[@]}"; do
             if [ "${MENU_LABELS[$i]}" = "$selected" ]; then
