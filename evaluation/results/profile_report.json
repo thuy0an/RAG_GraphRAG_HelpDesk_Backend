@@ -1,0 +1,15 @@
+{
+  "queries": 6,
+  "embedding": {
+    "avg_s": 0.6782,
+    "p95_s": 0.0389
+  },
+  "retrieval": {
+    "avg_s": 0.6105,
+    "p95_s": 0.0443,
+    "k": 5
+  },
+  "recommendations": [
+    "Embedding va retrieval latency dang o muc on dinh trong profile hien tai."
+  ]
+}

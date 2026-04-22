@@ -1,0 +1,81 @@
+{
+  "best": {
+    "strategy": "Ensemble",
+    "weight_bm25": "0.50",
+    "runs": "12",
+    "avg_latency_s": "0.9029",
+    "avg_point_recall": "0.8500"
+  },
+  "all": [
+    {
+      "strategy": "BM25",
+      "weight_bm25": "",
+      "runs": "12",
+      "avg_latency_s": "0.0062",
+      "avg_point_recall": "0.8167"
+    },
+    {
+      "strategy": "Vector",
+      "weight_bm25": "",
+      "runs": "12",
+      "avg_latency_s": "0.6453",
+      "avg_point_recall": "0.6500"
+    },
+    {
+      "strategy": "Ensemble",
+      "weight_bm25": "0.10",
+      "runs": "12",
+      "avg_latency_s": "4.7002",
+      "avg_point_recall": "0.6833"
+    },
+    {
+      "strategy": "Ensemble",
+      "weight_bm25": "0.20",
+      "runs": "12",
+      "avg_latency_s": "2.6033",
+      "avg_point_recall": "0.6833"
+    },
+    {
+      "strategy": "Ensemble",
+      "weight_bm25": "0.30",
+      "runs": "12",
+      "avg_latency_s": "1.4539",
+      "avg_point_recall": "0.6833"
+    },
+    {
+      "strategy": "Ensemble",
+      "weight_bm25": "0.40",
+      "runs": "12",
+      "avg_latency_s": "2.0147",
+      "avg_point_recall": "0.6833"
+    },
+    {
+      "strategy": "Ensemble",
+      "weight_bm25": "0.50",
+      "runs": "12",
+      "avg_latency_s": "0.9029",
+      "avg_point_recall": "0.8500"
+    },
+    {
+      "strategy": "Ensemble",
+      "weight_bm25": "0.60",
+      "runs": "12",
+      "avg_latency_s": "3.1329",
+      "avg_point_recall": "0.8333"
+    },
+    {
+      "strategy": "Ensemble",
+      "weight_bm25": "0.70",
+      "runs": "12",
+      "avg_latency_s": "1.7944",
+      "avg_point_recall": "0.8167"
+    },
+    {
+      "strategy": "Ensemble",
+      "weight_bm25": "0.80",
+      "runs": "12",
+      "avg_latency_s": "0.8600",
+      "avg_point_recall": "0.8167"
+    }
+  ]
+}

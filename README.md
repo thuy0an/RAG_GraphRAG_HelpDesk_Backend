@@ -31,6 +31,17 @@ Hệ thống RAG (Retrieval-Augmented Generation) chatbot hỗ trợ truy vấn 
 | Embedding | nomic-embed-text (Ollama) / codestral-embed (Mistral) |
 | Language | Python 3.12 |
 
+### 🚀 Performance Optimizations
+
+Hệ thống đã được tối ưu hóa với **Grid Search Optimization** để tìm ra cấu hình chunk tối ưu:
+
+| Pipeline | Cấu hình tối ưu | Latency | Cải thiện |
+|----------|-----------------|---------|-----------|
+| **PaCRAG** | Parent:1024, Child:128, Overlap:50 | 8.03s | **82%** |
+| **GraphRAG** | Graph:800, Overlap:100 | 12.95s | **57%** |
+
+**Hybrid Search + LLM Reranking** đã được tích hợp sẵn để cải thiện độ chính xác retrieval.
+
 ---
 
 ## Yêu cầu hệ thống
@@ -313,6 +324,69 @@ venv\Scripts\python.exe -m pytest src/tests/test_memory_repository.py src/tests/
 ```
 
 > **Lưu ý:** Hai test suite cần hai môi trường khác nhau vì `langchain` và `sqlmodel` chưa được cài chung vào một venv. Để chạy tất cả từ một môi trường, cài đủ packages vào cùng một venv.
+
+---
+
+## Benchmark và Evaluation
+
+Hệ thống đã được đánh giá toàn diện với các benchmark tự động:
+
+### 🎯 Kết quả Performance chính
+
+| Pipeline | Latency (s) | Confidence | Accuracy (baseline) | Accuracy (reranking) |
+|----------|-------------|------------|-------------------|-------------------|
+| **PaCRAG** | 45.27 | 0.77 | **90.0%** | 88.3% |
+| **GraphRAG** | **30.58** | **0.84** | 61.7% | **86.7%** |
+
+### 📊 Chunk Optimization Results
+
+Grid Search trên 44 cấu hình đã tìm ra setup tối ưu:
+
+```yaml
+# PaCRAG Optimal (82% improvement)
+parent_chunk_size: 1024
+child_chunk_size: 128
+child_chunk_overlap: 50
+# Result: 8.03s latency
+
+# GraphRAG Optimal (57% improvement)  
+graph_chunk_size: 800
+graph_chunk_overlap: 100
+# Result: 12.95s latency
+```
+
+### 🔧 Chạy Benchmark
+
+```bash
+# Benchmark chính (12 câu hỏi lý thuyết đồ thị)
+PYTHONPATH=src python evaluation/scripts/run_benchmark.py
+
+# Grid search chunk optimization
+PYTHONPATH=src python evaluation/scripts/benchmark_chunk_grid.py
+
+# So sánh độ chính xác
+PYTHONPATH=src python evaluation/scripts/compare_accuracy.py
+
+# Tạo biểu đồ
+PYTHONPATH=src python evaluation/scripts/generate_plots.py
+```
+
+### 📁 Kết quả Evaluation
+
+```
+evaluation/
+├── dataset/
+│   └── benchmark_questions.json     # 12 câu hỏi test
+├── results/
+│   ├── raw.json                     # Dữ liệu thô 48 lần chạy
+│   ├── summary.csv                  # Tổng hợp metrics
+│   ├── accuracy_summary.csv         # Độ chính xác
+│   ├── chunk_grid_benchmark.csv     # Kết quả grid search
+│   └── summary_table.md             # Bảng so sánh
+└── plots/
+    ├── latency_comparison.png       # So sánh tốc độ
+    └── retrieval_comparison.png     # So sánh retrieval
+```
 
 ---
 

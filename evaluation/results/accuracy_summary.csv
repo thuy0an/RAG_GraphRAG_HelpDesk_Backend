@@ -1,0 +1,5 @@
+pipeline,runs,avg_point_recall
+PaCRAG,12,0.9000
+GraphRAG,12,0.6167
+PaCRAG+rerank,12,0.8833
+GraphRAG+rerank,12,0.8667

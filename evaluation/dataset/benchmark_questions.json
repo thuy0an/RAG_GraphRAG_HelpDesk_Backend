@@ -1,0 +1,174 @@
+{
+  "name": "smartdoc_ai_benchmark_v4",
+  "description": "Bộ câu hỏi benchmark trên corpus graph theory 1-8.pdf (lý thuyết đồ thị)",
+  "questions": [
+    {
+      "id": "q01",
+      "type": "single-hop",
+      "difficulty": "easy",
+      "question": "Định nghĩa đồ thị là gì? Phân biệt đồ thị có hướng và đồ thị vô hướng.",
+      "expected_sources": ["graph theory 1.pdf"],
+      "expected_answer_points": [
+        "đỉnh",
+        "cạnh",
+        "đồ thị có hướng",
+        "đồ thị vô hướng",
+        "cặp đỉnh"
+      ]
+    },
+    {
+      "id": "q02",
+      "type": "single-hop",
+      "difficulty": "easy",
+      "question": "Bậc của một đỉnh trong đồ thị là gì? Tính chất gì liên quan đến tổng bậc của tất cả các đỉnh trong đồ thị?",
+      "expected_sources": ["graph theory 1.pdf"],
+      "expected_answer_points": [
+        "bậc đỉnh",
+        "số cạnh kề",
+        "tổng bậc",
+        "bằng hai lần số cạnh",
+        "đỉnh lẻ"
+      ]
+    },
+    {
+      "id": "q03",
+      "type": "multi-hop",
+      "difficulty": "medium",
+      "question": "Định nghĩa đồ thị liên thông là gì? Phân biệt giữa đồ thị liên thông mạnh và đồ thị liên thông yếu trong đồ thị có hướng.",
+      "expected_sources": ["graph theory 2.pdf"],
+      "expected_answer_points": [
+        "liên thông",
+        "đường đi",
+        "liên thông mạnh",
+        "liên thông yếu",
+        "đồ thị có hướng"
+      ]
+    },
+    {
+      "id": "q04",
+      "type": "multi-hop",
+      "difficulty": "medium",
+      "question": "Trình bày các khái niệm về cây trong lý thuyết đồ thị: cây là gì, cây khung là gì, và các tính chất đặc trưng của cây.",
+      "expected_sources": ["graph theory 2.pdf"],
+      "expected_answer_points": [
+        "cây",
+        "liên thông",
+        "không chu trình",
+        "cây khung",
+        "n đỉnh n-1 cạnh"
+      ]
+    },
+    {
+      "id": "q05",
+      "type": "multi-hop",
+      "difficulty": "hard",
+      "question": "So sánh hai thuật toán duyệt đồ thị BFS và DFS: nguyên tắc hoạt động, cấu trúc dữ liệu sử dụng, độ phức tạp và ứng dụng thực tế.",
+      "expected_sources": ["graph theory 3.pdf"],
+      "expected_answer_points": [
+        "BFS",
+        "DFS",
+        "hàng đợi",
+        "ngăn xếp",
+        "đường đi ngắn nhất"
+      ]
+    },
+    {
+      "id": "q06",
+      "type": "single-hop",
+      "difficulty": "easy",
+      "question": "Định nghĩa đồ thị Euler và đồ thị nửa Euler là gì? Điều kiện để một đồ thị có chu trình Euler là gì?",
+      "expected_sources": ["graph theory 4.pdf"],
+      "expected_answer_points": [
+        "chu trình Euler",
+        "đường đi Euler",
+        "mỗi cạnh đúng một lần",
+        "bậc chẵn",
+        "liên thông"
+      ]
+    },
+    {
+      "id": "q07",
+      "type": "single-hop",
+      "difficulty": "easy",
+      "question": "Định nghĩa đồ thị Hamilton là gì? Điều kiện cần và đủ để một đồ thị có chu trình Hamilton.",
+      "expected_sources": ["graph theory 4.pdf"],
+      "expected_answer_points": [
+        "chu trình Hamilton",
+        "đường đi Hamilton",
+        "mỗi đỉnh đúng một lần",
+        "định lý Dirac",
+        "định lý Ore"
+      ]
+    },
+    {
+      "id": "q08",
+      "type": "multi-hop",
+      "difficulty": "medium",
+      "question": "Bài toán cây khung nhỏ nhất là gì? Trình bày ý tưởng chính của thuật toán Kruskal và Prim để giải quyết bài toán này.",
+      "expected_sources": ["graph theory 5.pdf"],
+      "expected_answer_points": [
+        "cây khung nhỏ nhất",
+        "Kruskal",
+        "Prim",
+        "cạnh có trọng số nhỏ nhất",
+        "đồ thị liên thông"
+      ]
+    },
+    {
+      "id": "q09",
+      "type": "multi-hop",
+      "difficulty": "medium",
+      "question": "So sánh thuật toán Bellman-Ford và thuật toán Dijkstra trong việc giải quyết bài toán đường đi ngắn nhất: điều kiện áp dụng, độ phức tạp thời gian và trường hợp sử dụng phù hợp.",
+      "expected_sources": ["graph theory 6.pdf"],
+      "expected_answer_points": [
+        "Bellman-Ford",
+        "Dijkstra",
+        "trọng số âm",
+        "độ phức tạp",
+        "đường đi ngắn nhất"
+      ]
+    },
+    {
+      "id": "q10",
+      "type": "multi-hop",
+      "difficulty": "hard",
+      "question": "Trình bày định lý max-flow min-cut và giải thích mối quan hệ giữa luồng cực đại và lát cắt cực tiểu trong đồ thị có hướng có trọng số.",
+      "expected_sources": ["graph theory 7.pdf"],
+      "expected_answer_points": [
+        "luồng cực đại",
+        "lát cắt cực tiểu",
+        "max-flow",
+        "min-cut",
+        "Ford-Fulkerson"
+      ]
+    },
+    {
+      "id": "q11",
+      "type": "single-hop",
+      "difficulty": "easy",
+      "question": "Định nghĩa đồ thị phân đôi xứng là gì? Cho ví dụ về ứng dụng của đồ thị phân đôi xứng trong thực tế.",
+      "expected_sources": ["graph theory 8.pdf"],
+      "expected_answer_points": [
+        "đồ thị phân đôi xứng",
+        "hai tập đỉnh",
+        "không có cạnh nối trong cùng tập",
+        "ghép cặp",
+        "bài toán gán việc"
+      ]
+    },
+    {
+      "id": "q12",
+      "type": "multi-hop",
+      "difficulty": "medium",
+      "question": "Bài toán ghép cặp cực đại trong đồ thị phân đôi xứng là gì? Trình bày thuật toán Hungarian để giải quyết bài toán này.",
+      "expected_sources": ["graph theory 8.pdf"],
+      "expected_answer_points": [
+        "ghép cặp cực đại",
+        "đồ thị phân đôi xứng",
+        "thuật toán Hungarian",
+        "đường tăng luồng",
+        "định lý Hall"
+      ]
+    }
+  ]
+}

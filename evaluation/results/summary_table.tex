@@ -1,0 +1,36 @@
+% Auto-generated from evaluation/results/summary.csv
+\begin{table}[h]
+\renewcommand{\arraystretch}{1.2}
+\caption{Tong hop benchmark PaCRAG va GraphRAG}
+\label{tab:auto-benchmark-summary}
+\centering
+\begin{tabular}{|l|c|c|c|c|c|}
+\hline
+\textbf{Pipeline} & \textbf{Runs} & \textbf{Avg latency (s)} & \textbf{Median latency (s)} & \textbf{Avg chunks} & \textbf{Avg sources} \\
+\hline
+PaCRAG & 24 & 45.2654 & 40.7150 & 7.4583 & 4.0417 \\
+\hline
+GraphRAG & 24 & 30.5825 & 32.7700 & 20.0000 & 3.2500 \\
+\hline
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\renewcommand{\arraystretch}{1.2}
+\caption{Tong hop theo loai cau hoi}
+\label{tab:auto-benchmark-by-type}
+\centering
+\begin{tabular}{|l|l|c|c|c|}
+\hline
+\textbf{Question type} & \textbf{Pipeline} & \textbf{Runs} & \textbf{Avg latency (s)} & \textbf{Avg chunks} \\
+\hline
+multi-hop & GraphRAG & 14 & 35.1886 & 20.0000 \\
+\hline
+multi-hop & PaCRAG & 14 & 51.0671 & 7.4286 \\
+\hline
+single-hop & GraphRAG & 10 & 24.1340 & 20.0000 \\
+\hline
+single-hop & PaCRAG & 10 & 37.1430 & 7.5000 \\
+\hline
+\end{tabular}
+\end{table}

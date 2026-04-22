@@ -274,7 +274,7 @@ class RedisVSRepository:
     # ============================================================
     # SEARCH/RETRIEVE OPERATIONS
     # ============================================================
-    async def hybrid_retriver(self, query: str, k: int = 5, source_filter: Optional[str] = None, source_filters: Optional[List[str]] = None) -> List[Dict]:
+    async def hybrid_retriver(self, query: str, k: int = 15, source_filter: Optional[str] = None, source_filters: Optional[List[str]] = None) -> List[Dict]:
         hre = HybridRetriever(
             self.embeddings, 
             self.redis_url,

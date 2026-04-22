@@ -210,18 +210,32 @@ class GraphRAG(BaseRAG):
                         query, doc_passages, top_k=len(doc_passages)
                     )
 
-            with metrics.stage("extract_entities"):
-                entities = self.internal.extract_query_entities(query)
+            # Chạy song song entity extraction + hierarchical context để giảm latency
+            import asyncio as _asyncio
+
+            async def _extract_entities_safe():
+                try:
+                    return self.internal.extract_query_entities(query)
+                except Exception as e:
+                    log.warning(f"Entity extraction failed: {e}")
+                    return []
+
+            async def _get_hierarchical_context():
+                section_summaries = self.internal.get_section_summaries(list(section_ids))
+                doc_summary_parts = self.internal.get_document_summaries(list(doc_ids))
+                return section_summaries, doc_summary_parts
+
+            with metrics.stage("extract_entities+hierarchical_context"):
+                (entities, (section_summaries, doc_summary_parts)) = await _asyncio.gather(
+                    _extract_entities_safe(),
+                    _get_hierarchical_context(),
+                )
             metrics.increment("entities_count", len(entities))
 
             with metrics.stage("graph_traversal"):
                 graph_facts = self.internal.get_entity_subgraph(
                     entities, depth=self.internal._graph_depth
-                )
-
-            with metrics.stage("hierarchical_context"):
-                section_summaries = self.internal.get_section_summaries(list(section_ids))
-                doc_summary_parts = self.internal.get_document_summaries(list(doc_ids))
+                ) if entities else []
 
             with metrics.stage("llm_generation"):
                 prompt = self.internal.build_answer_prompt(

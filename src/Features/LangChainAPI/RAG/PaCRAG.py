@@ -118,11 +118,11 @@ class PaCRAG(BaseRAG):
             log.debug("Conversation history disabled (limit=0)")
 
         with metrics.stage("hybrid_retrieval"):
-            hybrid_docs = await self.redis_vs_repo.hybrid_retriver(query=query, k=5, source_filter=source_filter, source_filters=source_filters)
+            hybrid_docs = await self.redis_vs_repo.hybrid_retriver(query=query, k=15, source_filter=source_filter, source_filters=source_filters)
             print(hybrid_docs)
         metrics.increment("retrieved_docs", len(hybrid_docs))
 
-        # Re-ranking (optional)
+        # Re-ranking (optional): lấy 15 chunks, rerank lấy top 5
         _do_rerank = enable_reranking if enable_reranking is not None else self.enable_reranking
         if _do_rerank and hybrid_docs:
             if self._reranker is None:
@@ -174,10 +174,10 @@ class PaCRAG(BaseRAG):
         start = time.perf_counter()
 
         with metrics.stage("hybrid_retrieval"):
-            hybrid_docs = await self.redis_vs_repo.hybrid_retriver(query=query, k=5, source_filter=source_filter, source_filters=source_filters)
+            hybrid_docs = await self.redis_vs_repo.hybrid_retriver(query=query, k=15, source_filter=source_filter, source_filters=source_filters)
         metrics.increment("retrieved_docs", len(hybrid_docs))
 
-        # Re-ranking (optional)
+        # Re-ranking (optional): lấy 15 chunks, rerank lấy top 5
         reranking_scores = None
         reranking_time_s = None
         _do_rerank = enable_reranking if enable_reranking is not None else self.enable_reranking
