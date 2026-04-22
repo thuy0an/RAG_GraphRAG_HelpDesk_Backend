@@ -257,6 +257,15 @@ class GraphRAG(BaseRAG):
                     if fallback_answer:
                         answer = fallback_answer
 
+            # Nếu vẫn từ chối dù đã có passage, ép tạo câu trả lời bám sát ngữ cảnh.
+            if doc_passages and self._is_refusal(answer):
+                with metrics.stage("grounded_retry_generation"):
+                    retry_prompt = self._build_grounded_retry_prompt(query, doc_passages)
+                    response = self.provider.invoke(retry_prompt)
+                    retry_answer = response.content.strip() if hasattr(response, "content") else str(response).strip()
+                    if retry_answer:
+                        answer = retry_answer
+
             metrics.log_summary()
             log.info("GraphRAG query completed")
 
@@ -376,9 +385,15 @@ class GraphRAG(BaseRAG):
         text = answer.strip().lower()
         refusal_markers = [
             "tôi không có đủ thông tin",
+            "không đủ thông tin để trả lời",
             "không tìm thấy thông tin",
             "không có thông tin",
             "vui lòng liên hệ",
+            "i'm sorry",
+            "the provided text does not contain",
+            "does not contain any information",
+            "if you could provide more context",
+            "i don't have enough data",
             "i don't have enough information",
             "not enough information",
             "please contact support",
@@ -394,9 +409,28 @@ class GraphRAG(BaseRAG):
         context = "\n\n---\n\n".join(passages)
         return (
             "Ban la tro ly AI. Hay tra loi cau hoi dua tren cac doan sau. "
-            "Neu chi co mot phan thong tin, tra loi phan do. "
-            "Neu hoan toan khong lien quan, tra loi: 'Khong du thong tin de tra loi.'\n\n"
+            "Neu cau hoi bang tieng Viet thi bat buoc tra loi bang tieng Viet. "
+            "Neu thong tin chi duoc mot phan, hay tra loi phan chac chan nhat truoc va ghi ro phan chua du. "
+            "Chi tra loi 'Khong du thong tin de tra loi' khi cac doan hoan toan khong lien quan.\n\n"
             f"Doan van:\n{context}\n\n"
+            f"Cau hoi: {query}\n\n"
+            "Tra loi:"
+        )
+
+    def _build_grounded_retry_prompt(self, query: str, doc_passages: List[dict]) -> str:
+        passages = [
+            p.get("content", "")
+            for p in doc_passages[:8]
+            if isinstance(p, dict) and p.get("content")
+        ]
+        context = "\n\n---\n\n".join(passages)
+        return (
+            "Ban la tro ly RAG. NHIEM VU: tra loi dua tren doan trich, KHONG duoc tu choi chung chung. "
+            "Neu cau hoi bang tieng Viet thi bat buoc tra loi bang tieng Viet. "
+            "Neu chi co mot phan thong tin, van phai tra loi phan do va neu ro gioi han. "
+            "Cam dung cac cau mo dau kieu: 'I'm sorry', 'the provided text does not contain', 'khong du thong tin' tru khi tat ca doan deu khong lien quan. "
+            "Trinh bay gon: 1) Tra loi chinh 2) Bang chung tu doan trich.\n\n"
+            f"Doan trich:\n{context}\n\n"
             f"Cau hoi: {query}\n\n"
             "Tra loi:"
         )

@@ -64,10 +64,12 @@ Hướng dẫn:
 - Nếu câu hỏi là lời chào: chỉ chào lại ngắn gọn, không dùng ngữ cảnh.
 - Nếu là câu hỏi tiếp nối: sử dụng lịch sử hội thoại để hiểu ngữ cảnh.
 - Nếu là câu hỏi thực sự: trả lời đầy đủ dựa trên ngữ cảnh, ưu tiên dữ liệu tài liệu hơn suy diễn.
+- Nếu ngữ cảnh chỉ cho phép trả lời một phần, hãy trả lời phần chắc chắn nhất trước rồi ghi rõ phần chưa đủ.
+- Không được từ chối nếu vẫn có đoạn, tóm tắt hoặc quan hệ thực thể liên quan trong ngữ cảnh.
 - Sau phần trả lời, thêm nguồn theo định dạng:
     - Nguồn: <tên file>
     - Trang: <số trang>
-- Nếu hoàn toàn không có dữ liệu liên quan trong ngữ cảnh: trả lời "Tôi không có thông tin về vấn đề này, vui lòng liên hệ bộ phận hỗ trợ."
+- Chỉ khi hoàn toàn không có dữ liệu liên quan trong ngữ cảnh mới được trả lời "Tôi không có thông tin về vấn đề này, vui lòng liên hệ bộ phận hỗ trợ."
 
 === Tổng quan tài liệu ===
 {doc_summary}

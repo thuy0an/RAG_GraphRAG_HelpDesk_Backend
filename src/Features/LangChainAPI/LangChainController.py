@@ -290,6 +290,8 @@ class LangChainController:
             parent_chunk_overlap: int | None = Form(None),
             child_chunk_size: int | None = Form(None),
             child_chunk_overlap: int | None = Form(None),
+            graph_chunk_size: int | None = Form(None),
+            graph_chunk_overlap: int | None = Form(None),
             langfacade: LangChainFacade = Depends(),
         ):
             results = []
@@ -319,8 +321,8 @@ class LangChainController:
                 graph_task = langfacade.GraphRAG.ingest(
                     graph_file,
                     file.filename,
-                    chunk_size=child_chunk_size,
-                    chunk_overlap=child_chunk_overlap,
+                    chunk_size=graph_chunk_size if graph_chunk_size is not None else child_chunk_size,
+                    chunk_overlap=graph_chunk_overlap if graph_chunk_overlap is not None else child_chunk_overlap,
                 )
 
                 pac_result, graph_result = await asyncio.gather(
