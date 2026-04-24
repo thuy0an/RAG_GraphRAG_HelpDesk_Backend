@@ -1,6 +1,6 @@
 # SmartDoc AI - Intelligent Document Q&A System (Backend)
 
-Hệ thống RAG (Retrieval-Augmented Generation) chatbot hỗ trợ truy vấn tài liệu thông minh, xây dựng với FastAPI và LangChain. Hỗ trợ hai pipeline RAG song song: **PaCRAG** (Parent-Child chunking + Redis) và **GraphRAG** (Lexical Graph + Neo4j + FAISS).
+Hệ thống RAG (Retrieval-Augmented Generation) chatbot hỗ trợ truy vấn tài liệu thông minh, xây dựng với FastAPI và LangChain. Hỗ trợ hai pipeline RAG: **PaCRAG** (Parent-Child chunking + Redis Vector Store) và **GraphRAG** (Knowledge Graph + Neo4j).
 
 ---
 
@@ -22,40 +22,36 @@ Hệ thống RAG (Retrieval-Augmented Generation) chatbot hỗ trợ truy vấn 
 
 | Thành phần | Công nghệ |
 |---|---|
-| Framework | FastAPI + Uvicorn / Granian |
-| AI / LLM | LangChain, Ollama (Qwen2.5), Mistral API |
-| Vector Store | Redis (PaCRAG) + FAISS (GraphRAG) |
-| Graph DB | Neo4j |
-| Relational DB | MySQL (aiomysql) |
-| Conversation History | SQLite (aiosqlite) |
-| Embedding | nomic-embed-text (Ollama) / codestral-embed (Mistral) |
+| Framework | FastAPI + Uvicorn |
+| AI / LLM | LangChain + Ollama (Qwen2.5:7b) |
+| Vector Store | Redis (RedisVL) |
+| Graph Database | Neo4j |
+| Conversation History | SQLite |
+| Embedding | nomic-embed-text |
+| Document Processing | PyMuPDF, Unstructured (OCR) |
 | Language | Python 3.12 |
 
-### 🚀 Performance Optimizations
+### 🚀 Key Features
 
-Hệ thống đã được tối ưu hóa với **Grid Search Optimization** để tìm ra cấu hình chunk tối ưu:
-
-| Pipeline | Cấu hình tối ưu | Latency | Cải thiện |
-|----------|-----------------|---------|-----------|
-| **PaCRAG** | Parent:1024, Child:128, Overlap:50 | 8.03s | **82%** |
-| **GraphRAG** | Graph:800, Overlap:100 | 12.95s | **57%** |
-
-**Hybrid Search + LLM Reranking** đã được tích hợp sẵn để cải thiện độ chính xác retrieval.
+- **Hybrid Search**: Vector Search + BM25 Full-Text Search với RRF Fusion
+- **Parent-Child Chunking**: Parent (1024 tokens) cho context, Child (128 tokens) cho search
+- **LLM Re-ranking**: Cải thiện retrieval accuracy
+- **Streaming Response**: Real-time token streaming
+- **Conversation History**: Context-aware responses
 
 ---
 
 ## Yêu cầu hệ thống
 
-- Python 3.12+
-- [Ollama](https://ollama.ai) đang chạy local
-- Redis (port 6380 mặc định)
-- Neo4j (port 7687 mặc định)
-- MySQL (port 3306 mặc định)
+- **Python 3.12+**
+- **[Ollama](https://ollama.ai)** đang chạy local
+- **Redis** (port 6380) - Vector store
+- **Neo4j** (port 7687) - Graph database
 
 ### Pull model Ollama
 
 ```bash
-ollama pull qwen2.5:3b
+ollama pull qwen2.5:7b
 ollama pull nomic-embed-text:latest
 ```
 
@@ -84,11 +80,6 @@ source venv/bin/activate
 pip install -r packages.sh
 ```
 
-> Một số package cần thêm (PDF, DOCX processing):
-> ```bash
-> pip install pymupdf docx2txt faiss-cpu aiosqlite
-> ```
-
 ### 3. Cấu hình môi trường
 
 Sao chép và chỉnh sửa file config:
@@ -103,56 +94,42 @@ Chỉnh sửa các giá trị trong `config_env/config.yaml` (xem phần [Cấu 
 
 ## Cấu hình
 
-Tất cả cấu hình nằm trong `config_env/config.yaml`.
-
-### Các giá trị cần thay đổi
+Chỉnh sửa `config_env/config.yaml`:
 
 ```yaml
-database:
-  mysql:
-    url: mysql+aiomysql://root:<password>@localhost:3306/AI_HelpDesk
-
+# Redis Vector Store
 redis:
   url: redis://localhost:6380
 
+# LLM Provider
 llm:
-  provider: ollama          # hoặc "mistral"
+  provider: ollama
   ollama:
     host: http://localhost:11434
-    model: qwen2.5:3b
+    model: qwen2.5:7b
     embed: nomic-embed-text:latest
 
+# Neo4j Graph Database
 neo4j:
   uri: bolt://localhost:7687
   user: neo4j
-  password: <password>
+  password: <your_password>
 
-conversational_rag:
-  conversation_history_limit: 5   # 0 = tắt lịch sử hội thoại
-```
-
-### Chunk strategy (PaCRAG)
-
-```yaml
+# Parent-Child Chunking
 llm:
   splitter:
     PaC:
-      parent_chunk_size: 2048
-      parent_chunk_overlap: 400
-      child_chunk_size: 512
-      child_chunk_overlap: 100
-```
+      parent_chunk_size: 1024      # Large context chunks
+      parent_chunk_overlap: 50
+      child_chunk_size: 128        # Search-optimized chunks
+      child_chunk_overlap: 50
 
-### GraphRAG
-
-```yaml
+# GraphRAG
 graph_rag:
   chunk_size: 800
   chunk_overlap: 100
-  top_k: 16
+  top_k: 20
   graph_depth: 3
-  faiss_index_dir: specs/data/graph_rag/faiss_index
-  label_prefix: GR
 ```
 
 ---
@@ -190,59 +167,27 @@ API docs (Scalar): `http://localhost:8080/scalar`
 AI_HelpDesk_Backend/
 ├── src/
 │   ├── main.py                          # Entry point
-│   ├── Domain/
-│   │   ├── history_entities.py          # ConversationHistory schema
-│   │   └── compare_entities.py          # CompareRun schema
 │   ├── Features/
 │   │   ├── LangChainAPI/
-│   │   │   ├── LangChainController.py   # Tất cả RAG endpoints
-│   │   │   ├── LangChainFacade.py       # Facade khởi tạo PaCRAG + GraphRAG
-│   │   │   ├── LangChainDTO.py          # Request/Response models
-│   │   │   ├── prompt.py                # Prompt templates + history formatting
+│   │   │   ├── LangChainController.py   # REST API endpoints
+│   │   │   ├── LangChainFacade.py       # PaCRAG + GraphRAG setup
 │   │   │   ├── RAG/
-│   │   │   │   ├── BaseRAG.py           # Abstract base class
-│   │   │   │   ├── PaCRAG.py            # Parent-Child RAG (Redis)
-│   │   │   │   ├── GraphRAG.py          # Graph RAG (Neo4j + FAISS)
-│   │   │   │   ├── GraphRAGInternal.py  # Lexical graph pipeline
-│   │   │   │   ├── Loader.py            # PDF / DOCX / TXT loader
-│   │   │   │   ├── Process.py           # Chunking pipeline
-│   │   │   │   ├── Retriever.py         # Hybrid retriever (BM25 + vector)
-│   │   │   │   ├── LLMReranker.py       # LLM-based re-ranking
-│   │   │   │   └── ConfidenceScorer.py  # Self-evaluation scoring
-│   │   │   ├── persistence/
-│   │   │   │   ├── MemoryRepository.py  # Conversation history (SQLite)
-│   │   │   │   ├── CompareRepository.py # Compare runs (SQLite)
-│   │   │   │   ├── RedisVSRepository.py # Redis vector store
-│   │   │   │   └── Neo4JStore.py        # Neo4j graph store
-│   │   └── SharedKernelAPI/
-│   │       └── SharedKernelController.py  # Health check endpoints
-│   └── SharedKernel/
-│       ├── base/                        # FastAPI app, DI, Logger, Metrics
-│       ├── config/                      # LLMConfig, VectorStoreConfig
-│       ├── exception/                   # APIException
-│       ├── persistence/                 # PersistenceManager, Neo4jManager, Redis
-│       ├── threading/                   # ThreadPoolManager
-│       └── utils/                       # yamlenv, Utils
+│   │   │   │   ├── PaCRAG.py            # Parent-Child RAG
+│   │   │   │   ├── GraphRAG.py          # Graph RAG
+│   │   │   │   ├── Loader.py            # Document loader
+│   │   │   │   ├── Process.py           # Chunking strategies
+│   │   │   │   ├── Retriever.py         # Hybrid search
+│   │   │   │   └── LLMReranker.py       # Re-ranking
+│   │   │   └── persistence/
+│   │   │       ├── RedisVSRepository.py # Redis operations
+│   │   │       └── Neo4JStore.py        # Neo4j operations
+│   │   └── RealTimeAPI/                 # WebSocket support
+│   └── SharedKernel/                    # Base classes, config
 ├── config_env/
-│   ├── config.yaml                      # Cấu hình chính
-│   ├── redis.yaml                       # Redis connection pool
-│   └── redis_index.yaml                 # Redis vector index schema
-├── specs/
-│   └── data/
-│       ├── chat_history.db              # SQLite — lịch sử hội thoại
-│       ├── compare_runs.db              # SQLite — compare runs
-│       └── graph_rag/faiss_index/       # FAISS index files
-├── static/                              # File upload storage
-├── src/tests/                           # Unit tests
-│   ├── test_prompt.py
-│   ├── test_process.py
-│   ├── test_memory_repository.py
-│   └── test_compare_entities.py
-├── packages.sh                          # Danh sách pip packages
-├── script.sh                            # Dev helper script (fzf menu)
-├── pytest.ini                           # Pytest config
-├── conftest.py                          # Pytest sys.path setup
-└── pyrightconfig.json                   # Pyright type checking
+│   └── config.yaml                      # Main configuration
+├── specs/data/                          # SQLite databases
+├── evaluation/                          # Benchmark scripts
+└── static/                              # File uploads
 ```
 
 ---
@@ -255,144 +200,48 @@ Base URL: `http://localhost:8080/api/v1`
 
 | Method | Endpoint | Mô tả |
 |--------|----------|-------|
-| `POST` | `/langchain/load_document_pdf_PaC` | Upload PDF/DOCX vào Redis vector store |
-| `POST` | `/langchain/retrieve_document` | Streaming chat với PaCRAG |
-| `DELETE` | `/langchain/delete_document` | Xóa document khỏi vector store |
-| `DELETE` | `/langchain/clear_vector_store` | Xóa toàn bộ (hoặc theo source) |
-| `GET` | `/langchain/chat_history/{session_id}` | Lấy lịch sử hội thoại |
-| `DELETE` | `/langchain/clear_history/{session_id}` | Xóa lịch sử hội thoại |
+| `POST` | `/langchain/load_document_pdf_PaC` | Upload PDF/DOCX |
+| `POST` | `/langchain/retrieve_document` | Streaming chat |
+| `DELETE` | `/langchain/delete_document` | Xóa document |
+| `GET` | `/langchain/chat_history/{session_id}` | Lịch sử hội thoại |
 
 ### GraphRAG
 
 | Method | Endpoint | Mô tả |
 |--------|----------|-------|
-| `POST` | `/langchain/build-graph` | Upload file và build lexical graph |
+| `POST` | `/langchain/build-graph` | Build knowledge graph |
 | `POST` | `/langchain/graph/query` | Query GraphRAG |
-| `POST` | `/langchain/graph/multi-hop-query` | Multi-hop reasoning query |
-| `DELETE` | `/langchain/graph/{source}` | Xóa graph của một document |
-| `DELETE` | `/langchain/graph` | Xóa toàn bộ Neo4j graph |
-| `GET` | `/langchain/graph/history/{session_id}` | Lịch sử GraphRAG |
-| `DELETE` | `/langchain/graph/history/{session_id}` | Xóa lịch sử GraphRAG |
+| `DELETE` | `/langchain/graph/{source}` | Xóa graph |
 
 ### Compare (PaCRAG vs GraphRAG)
 
 | Method | Endpoint | Mô tả |
 |--------|----------|-------|
-| `POST` | `/langchain/compare/upload` | Upload file vào cả 2 RAG |
-| `POST` | `/langchain/compare/query` | Query song song cả 2 RAG |
-| `GET` | `/langchain/compare/history/{session_id}` | Lịch sử compare runs |
-| `DELETE` | `/langchain/compare/history/{run_id}` | Xóa một compare run |
-
-### Conversation Turn Management
-
-| Method | Endpoint | Mô tả |
-|--------|----------|-------|
-| `POST` | `/langchain/begin_turn` | Tạo turn mới, trả về `turn_id` |
-| `POST` | `/langchain/save_turn` | Lưu Q&A hoàn chỉnh vào history |
-
-### Health Check
-
-| Method | Endpoint | Mô tả |
-|--------|----------|-------|
-| `GET` | `/shared_kernel/db` | Kiểm tra kết nối MySQL |
-| `GET` | `/shared_kernel/neo4j` | Kiểm tra kết nối Neo4j |
-| `GET` | `/shared_kernel/llm` | Kiểm tra LLM |
-| `GET` | `/shared_kernel/embedding` | Kiểm tra embedding model |
+| `POST` | `/langchain/compare/upload` | Upload vào cả 2 RAG |
+| `POST` | `/langchain/compare/query` | Query song song |
 
 ---
 
 ## Chạy tests
 
-Project có 56 unit tests không cần LLM, Redis, hay Neo4j.
+```bash
+python -m pytest src/tests/ -v
+```
 
-### test_prompt.py + test_process.py (dùng Anaconda / môi trường có langchain)
+## Benchmark
+
+Chạy evaluation trên dataset 12 câu hỏi:
 
 ```bash
-python -m pytest src/tests/test_prompt.py src/tests/test_process.py -v
+PYTHONPATH=src python evaluation/scripts/run_benchmark.py
 ```
 
-### test_memory_repository.py + test_compare_entities.py (dùng venv có sqlmodel)
-
-```bash
-venv\Scripts\python.exe -m pytest src/tests/test_memory_repository.py src/tests/test_compare_entities.py -v
-```
-
-### Kết quả mong đợi
-
-```
-56 passed
-```
-
-> **Lưu ý:** Hai test suite cần hai môi trường khác nhau vì `langchain` và `sqlmodel` chưa được cài chung vào một venv. Để chạy tất cả từ một môi trường, cài đủ packages vào cùng một venv.
+Kết quả lưu trong `evaluation/results/`
 
 ---
-
-## Benchmark và Evaluation
-
-Hệ thống đã được đánh giá toàn diện với các benchmark tự động:
-
-### 🎯 Kết quả Performance chính
-
-| Pipeline | Latency (s) | Confidence | Accuracy (baseline) | Accuracy (reranking) |
-|----------|-------------|------------|-------------------|-------------------|
-| **PaCRAG** | 45.27 | 0.77 | **90.0%** | 88.3% |
-| **GraphRAG** | **30.58** | **0.84** | 61.7% | **86.7%** |
-
-### 📊 Chunk Optimization Results
-
-Grid Search trên 44 cấu hình đã tìm ra setup tối ưu:
-
-```yaml
-# PaCRAG Optimal (82% improvement)
-parent_chunk_size: 1024
-child_chunk_size: 128
-child_chunk_overlap: 50
-# Result: 8.03s latency
-
-# GraphRAG Optimal (57% improvement)  
-graph_chunk_size: 800
-graph_chunk_overlap: 100
-# Result: 12.95s latency
-```
-
-### 🔧 Chạy Benchmark
-
-```bash
-# Benchmark chính (12 câu hỏi lý thuyết đồ thị)
-PYTHONPATH=src python evaluation/scripts/run_benchmark.py
-
-# Grid search chunk optimization
-PYTHONPATH=src python evaluation/scripts/benchmark_chunk_grid.py
-
-# So sánh độ chính xác
-PYTHONPATH=src python evaluation/scripts/compare_accuracy.py
-
-# Tạo biểu đồ
-PYTHONPATH=src python evaluation/scripts/generate_plots.py
-```
-
-### 📁 Kết quả Evaluation
-
-```
-evaluation/
-├── dataset/
-│   └── benchmark_questions.json     # 12 câu hỏi test
-├── results/
-│   ├── raw.json                     # Dữ liệu thô 48 lần chạy
-│   ├── summary.csv                  # Tổng hợp metrics
-│   ├── accuracy_summary.csv         # Độ chính xác
-│   ├── chunk_grid_benchmark.csv     # Kết quả grid search
-│   └── summary_table.md             # Bảng so sánh
-└── plots/
-    ├── latency_comparison.png       # So sánh tốc độ
-    └── retrieval_comparison.png     # So sánh retrieval
-```
 
 ---
 
 ## Giấy phép
 
 Dự án được phát hành theo giấy phép **GNU General Public License v3.0 (GPL-3.0)**.
-
-- File giấy phép cấp dự án: [../LICENSE](../LICENSE)
-- Bản sao trong backend: [LICENSE](LICENSE)
